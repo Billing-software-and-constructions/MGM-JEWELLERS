@@ -168,8 +168,8 @@ export const PrintableBill = ({
             </thead>
             <tbody>
               {billItems.map((item, index) => {
-                const isGold = item.categoryName.toLowerCase().includes('gold');
-                const metalRate = isGold ? goldRate : (silverRate || goldRate);
+                // Calculate rate per gram from saved gold_amount and weight
+                const metalRate = item.weight > 0 ? item.goldAmount / item.weight : 0;
                 const goldPrice = item.goldAmount + item.seikuliAmount;
                 const gstAmountForItem = item.gstApplicable ? (goldPrice * gstPercentage) / 100 : 0;
                 const totalPriceWithGst = goldPrice + gstAmountForItem;
