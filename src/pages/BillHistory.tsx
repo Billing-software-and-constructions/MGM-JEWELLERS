@@ -27,6 +27,9 @@ const getISTDate = () => {
 interface Bill {
   id: string;
   customer_name: string;
+  customer_phone?: string;
+  customer_address?: string;
+  customer_gst_pan?: string;
   bill_date: string;
   subtotal: number;
   gst_amount: number;
@@ -34,6 +37,7 @@ interface Bill {
   gold_rate?: number;
   gst_percentage?: number;
   invoice_number?: string;
+  discount_amount?: number;
 }
 
 interface BillItem {
@@ -687,8 +691,9 @@ const BillHistory = () => {
       {selectedBill && billItems.length > 0 && (
         <PrintableBill
           customerName={selectedBill.customer_name}
-          customerPhone=""
-          customerAddress=""
+          customerPhone={selectedBill.customer_phone || ""}
+          customerAddress={selectedBill.customer_address || ""}
+          customerGstPan={selectedBill.customer_gst_pan || ""}
           billItems={billItems.map(item => ({
             categoryName: item.category_name,
             subcategoryName: "",
@@ -703,6 +708,7 @@ const BillHistory = () => {
           gstPercentage={selectedBill.gst_percentage || 0}
           subtotal={selectedBill.subtotal}
           gstAmount={selectedBill.gst_amount}
+          discountAmount={selectedBill.discount_amount || 0}
           grandTotal={selectedBill.grand_total}
           exchangeType="buy-ornaments"
           invoiceNumber={selectedBill.invoice_number}

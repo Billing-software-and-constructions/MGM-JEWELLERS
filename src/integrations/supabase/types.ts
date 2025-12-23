@@ -72,7 +72,10 @@ export type Database = {
         Row: {
           bill_date: string
           created_at: string | null
+          customer_address: string | null
+          customer_gst_pan: string | null
           customer_name: string
+          customer_phone: string | null
           discount_amount: number | null
           gold_rate: number
           grand_total: number
@@ -86,7 +89,10 @@ export type Database = {
         Insert: {
           bill_date?: string
           created_at?: string | null
+          customer_address?: string | null
+          customer_gst_pan?: string | null
           customer_name: string
+          customer_phone?: string | null
           discount_amount?: number | null
           gold_rate: number
           grand_total: number
@@ -100,7 +106,10 @@ export type Database = {
         Update: {
           bill_date?: string
           created_at?: string | null
+          customer_address?: string | null
+          customer_gst_pan?: string | null
           customer_name?: string
+          customer_phone?: string | null
           discount_amount?: number | null
           gold_rate?: number
           grand_total?: number
