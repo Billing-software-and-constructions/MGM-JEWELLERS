@@ -250,6 +250,9 @@ const Billing = () => {
         error: billError
       } = await supabase.from('bills' as any).insert({
         customer_name: customerName,
+        customer_phone: customerPhone,
+        customer_address: customerAddress,
+        customer_gst_pan: customerGstPan,
         bill_date: new Date().toISOString(),
         gold_rate: goldRate,
         gst_percentage: gstPercentage,
