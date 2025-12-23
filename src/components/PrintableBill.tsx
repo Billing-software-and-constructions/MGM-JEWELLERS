@@ -162,15 +162,6 @@ export const PrintableBill = ({
                 <th className="border-r border-black p-0.5 text-left">Category</th>
                 <th className="border-r border-black p-0.5 text-left">Subcategory</th>
                 <th className="border-r border-black p-0.5 text-center">Weight (grams)</th>
-                {exchangeType === "buy-ornaments" && (
-                  <>
-                    <th className="border-r border-black p-0.5 text-right">Today's Gold/Silver Price</th>
-                    <th className="border-r border-black p-0.5 text-right">{metalPriceHeader}</th>
-                    {hasGst && (
-                      <th className="border-r border-black p-0.5 text-right">GST ({gstPercentage}%)</th>
-                    )}
-                  </>
-                )}
                 <th className="border-r border-black p-0.5 text-right">Rate per gram</th>
                 <th className="p-0.5 text-right">Total Price</th>
               </tr>
@@ -189,17 +180,6 @@ export const PrintableBill = ({
                     <td className="border-r border-black p-0.5">{item.categoryName}</td>
                     <td className="border-r border-black p-0.5">{item.subcategoryName}</td>
                     <td className="border-r border-black p-0.5 text-center">{item.weight.toFixed(3)}</td>
-                    {exchangeType === "buy-ornaments" && (
-                      <>
-                        <td className="border-r border-black p-0.5 text-right">₹{metalRate.toFixed(2)}</td>
-                        <td className="border-r border-black p-0.5 text-right">₹{goldPrice.toFixed(2)}</td>
-                        {hasGst && (
-                          <td className="border-r border-black p-0.5 text-right">
-                            {item.gstApplicable ? `₹${gstAmountForItem.toFixed(2)}` : '-'}
-                          </td>
-                        )}
-                      </>
-                    )}
                     <td className="border-r border-black p-0.5 text-right">₹{metalRate.toFixed(2)}</td>
                     <td className="p-0.5 text-right">₹{totalPriceWithGst.toFixed(2)}</td>
                   </tr>
@@ -217,15 +197,6 @@ export const PrintableBill = ({
                       {item.subcategoryName}
                     </td>
                     <td className="border-r border-black p-0.5 text-center text-orange-700">{item.finalWeight.toFixed(3)}</td>
-                    {exchangeType === "buy-ornaments" && (
-                      <>
-                        <td className="border-r border-black p-0.5 text-right text-orange-700">₹{item.ratePerGram.toFixed(2)}</td>
-                        <td className="border-r border-black p-0.5 text-right text-orange-700">-₹{item.value.toFixed(2)}</td>
-                        {hasGst && (
-                          <td className="border-r border-black p-0.5 text-right text-orange-700">-</td>
-                        )}
-                      </>
-                    )}
                     <td className="border-r border-black p-0.5 text-right text-orange-700">₹{item.ratePerGram.toFixed(2)}</td>
                     <td className="p-0.5 text-right text-orange-700">-₹{item.value.toFixed(2)}</td>
                   </tr>
