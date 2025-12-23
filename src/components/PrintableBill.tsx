@@ -73,11 +73,9 @@ export const PrintableBill = ({
     <div className="printable-bill hidden print:block print:w-full print:max-w-[210mm] print:mx-auto print:bg-white print:text-black print:p-4 font-sans">
       {/* Header Section */}
       <div className="border-2 border-black mb-2">
-        <div className="flex items-center justify-between gap-4 px-3 py-3 border-b border-black">
-          <div className="flex items-center gap-3">
-            <p className="text-2xl font-extrabold tracking-wide">MGM JEWELLERS</p>
-            <img src={mgmLogo} alt="MGM Jewellers Logo" className="h-14 w-auto" />
-          </div>
+        <div className="flex items-center justify-center gap-4 px-3 py-3 border-b border-black">
+          <p className="text-2xl font-extrabold tracking-wide">MGM JEWELLERS</p>
+          <img src={mgmLogo} alt="MGM Jewellers Logo" className="h-14 w-auto" />
         </div>
 
         <div className="text-center py-2 border-b border-black">
