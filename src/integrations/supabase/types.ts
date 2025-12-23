@@ -24,6 +24,7 @@ export type Database = {
           id: string
           seikuli_amount: number
           seikuli_rate: number
+          subcategory_name: string | null
           total: number
           weight: number
         }
@@ -36,6 +37,7 @@ export type Database = {
           id?: string
           seikuli_amount: number
           seikuli_rate: number
+          subcategory_name?: string | null
           total: number
           weight: number
         }
@@ -48,6 +50,7 @@ export type Database = {
           id?: string
           seikuli_amount?: number
           seikuli_rate?: number
+          subcategory_name?: string | null
           total?: number
           weight?: number
         }
@@ -72,6 +75,7 @@ export type Database = {
         Row: {
           bill_date: string
           created_at: string | null
+          credited_amount: number | null
           customer_address: string | null
           customer_gst_pan: string | null
           customer_name: string
@@ -89,6 +93,7 @@ export type Database = {
         Insert: {
           bill_date?: string
           created_at?: string | null
+          credited_amount?: number | null
           customer_address?: string | null
           customer_gst_pan?: string | null
           customer_name: string
@@ -106,6 +111,7 @@ export type Database = {
         Update: {
           bill_date?: string
           created_at?: string | null
+          credited_amount?: number | null
           customer_address?: string | null
           customer_gst_pan?: string | null
           customer_name?: string

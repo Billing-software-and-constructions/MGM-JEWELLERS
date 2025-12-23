@@ -258,6 +258,8 @@ const Billing = () => {
         gst_percentage: gstPercentage,
         subtotal,
         gst_amount: gstAmount,
+        discount_amount: discountAmount,
+        credited_amount: creditedAmount,
         grand_total: grandTotal,
         invoice_number: invoiceNumber
       }).select().single();
@@ -267,7 +269,8 @@ const Billing = () => {
       const itemsToInsert = billItems.map(item => ({
         bill_id: (billData as any).id,
         category_id: item.categoryId,
-        category_name: item.subcategoryName,
+        category_name: item.categoryName,
+        subcategory_name: item.subcategoryName,
         weight: item.weight,
         gold_amount: item.goldAmount,
         seikuli_amount: item.seikuliAmount,

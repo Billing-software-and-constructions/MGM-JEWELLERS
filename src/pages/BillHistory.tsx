@@ -38,11 +38,13 @@ interface Bill {
   gst_percentage?: number;
   invoice_number?: string;
   discount_amount?: number;
+  credited_amount?: number;
 }
 
 interface BillItem {
   id: string;
   category_name: string;
+  subcategory_name?: string;
   weight: number;
   gold_amount: number;
   seikuli_amount: number;
@@ -696,7 +698,7 @@ const BillHistory = () => {
           customerGstPan={selectedBill.customer_gst_pan || ""}
           billItems={billItems.map(item => ({
             categoryName: item.category_name,
-            subcategoryName: "",
+            subcategoryName: item.subcategory_name || "",
             weight: item.weight,
             goldAmount: item.gold_amount,
             seikuliAmount: item.seikuli_amount,
@@ -712,8 +714,8 @@ const BillHistory = () => {
           grandTotal={selectedBill.grand_total}
           exchangeType="buy-ornaments"
           invoiceNumber={selectedBill.invoice_number}
-          creditedAmount={0}
-          remainingAmount={selectedBill.grand_total}
+          creditedAmount={selectedBill.credited_amount || 0}
+          remainingAmount={selectedBill.grand_total - (selectedBill.credited_amount || 0)}
         />
       )}
 
