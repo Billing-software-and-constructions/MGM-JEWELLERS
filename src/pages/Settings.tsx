@@ -125,28 +125,13 @@ const Settings = () => {
     setSubcategories(subcategoriesData || []);
   };
   const handleSaveRates = async () => {
-    // First check if settings row exists
-    const { data: existingSettings } = await supabase.from('settings').select('id').maybeSingle();
-    
-    let error;
-    if (existingSettings) {
-      // Update existing row
-      const result = await supabase.from('settings').update({
-        gold_rate: parseFloat(goldRate),
-        silver_rate: parseFloat(silverRate),
-        gst_rate: parseFloat(gstRate)
-      }).eq('id', existingSettings.id);
-      error = result.error;
-    } else {
-      // Insert new row
-      const result = await supabase.from('settings').insert({
-        gold_rate: parseFloat(goldRate),
-        silver_rate: parseFloat(silverRate),
-        gst_rate: parseFloat(gstRate)
-      });
-      error = result.error;
-    }
-    
+    const {
+      error
+    } = await supabase.from('settings').update({
+      gold_rate: parseFloat(goldRate),
+      silver_rate: parseFloat(silverRate),
+      gst_rate: parseFloat(gstRate)
+    }).eq('id', (await supabase.from('settings').select('id').single()).data?.id);
     if (error) {
       toast.error("Failed to update rates");
     } else {
