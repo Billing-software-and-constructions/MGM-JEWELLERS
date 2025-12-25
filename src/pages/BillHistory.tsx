@@ -54,9 +54,6 @@ interface BillItem {
 interface OldExchange {
   id: string;
   customer_name: string;
-  customer_phone?: string;
-  customer_address?: string;
-  customer_gst_pan?: string;
   created_at: string;
   category_name: string;
   subcategory_name?: string;
@@ -67,7 +64,6 @@ interface OldExchange {
   exchange_type: string;
   bill_id?: string;
   invoice_number?: string;
-  credited_amount?: number;
 }
 
 const BillHistory = () => {
@@ -139,7 +135,7 @@ const BillHistory = () => {
   const loadBills = async () => {
     try {
       setLoading(true);
-
+      
       // Get start and end of day in ISO format
       const startOfDayISO = startOfDay(startDate).toISOString();
       const endOfDayISO = endOfDay(endDate).toISOString();
@@ -171,7 +167,7 @@ const BillHistory = () => {
   const loadOldExchanges = async () => {
     try {
       setLoading(true);
-
+      
       // Get start and end of day in ISO format
       const startOfDayISO = startOfDay(startDate).toISOString();
       const endOfDayISO = endOfDay(endDate).toISOString();
@@ -190,10 +186,10 @@ const BillHistory = () => {
 
       if (error) throw error;
 
-      // Map the data - use invoice_number from old_exchanges first, fallback to bills table
+      // Map the data to include invoice_number at the top level
       const mappedData = ((data as any) || []).map((exchange: any) => ({
         ...exchange,
-        invoice_number: exchange.invoice_number || exchange.bills?.invoice_number || null,
+        invoice_number: exchange.bills?.invoice_number || null,
         bills: undefined, // Remove nested bills object
       }));
 
@@ -253,7 +249,7 @@ const BillHistory = () => {
     setSelectedBill(bill);
     setIsDialogOpen(true);
     setLoadingDetails(true);
-
+    
     try {
       const { data, error } = await supabase
         .from('bill_items' as any)
@@ -271,67 +267,9 @@ const BillHistory = () => {
     }
   };
 
-  // State for linked bill data when viewing old exchange
-  const [linkedBill, setLinkedBill] = useState<Bill | null>(null);
-  const [linkedBillItems, setLinkedBillItems] = useState<BillItem[]>([]);
-  const [allExchangesForBill, setAllExchangesForBill] = useState<OldExchange[]>([]);
-
-  const handleViewExchangeDetails = async (exchange: OldExchange) => {
+  const handleViewExchangeDetails = (exchange: OldExchange) => {
     setSelectedExchange(exchange);
     setIsExchangeDialogOpen(true);
-    setLinkedBill(null);
-    setLinkedBillItems([]);
-    setAllExchangesForBill([]);
-
-    // If this exchange has a linked bill, fetch the bill and its items
-    if (exchange.bill_id) {
-      try {
-        // Fetch linked bill
-        const { data: billData, error: billError } = await supabase
-          .from('bills' as any)
-          .select('*')
-          .eq('id', exchange.bill_id)
-          .single();
-
-        if (!billError && billData) {
-          setLinkedBill(billData as unknown as Bill);
-
-          // Fetch bill items
-          const { data: itemsData, error: itemsError } = await supabase
-            .from('bill_items' as any)
-            .select('*')
-            .eq('bill_id', exchange.bill_id);
-
-          if (!itemsError && itemsData) {
-            setLinkedBillItems(itemsData as unknown as BillItem[]);
-          }
-        }
-
-        // Fetch all old exchanges linked to the same bill (for multiple exchanges)
-        const { data: exchangesData, error: exchangesError } = await supabase
-          .from('old_exchanges' as any)
-          .select('*')
-          .eq('bill_id', exchange.bill_id);
-
-        if (!exchangesError && exchangesData) {
-          setAllExchangesForBill(exchangesData as unknown as OldExchange[]);
-        }
-      } catch (error) {
-        console.error('Error fetching linked bill data:', error);
-      }
-    } else {
-      // Fetch all exchanges with same invoice_number for standalone cash exchanges
-      if (exchange.invoice_number) {
-        const { data: exchangesData } = await supabase
-          .from('old_exchanges' as any)
-          .select('*')
-          .eq('invoice_number', exchange.invoice_number);
-
-        if (exchangesData) {
-          setAllExchangesForBill(exchangesData as unknown as OldExchange[]);
-        }
-      }
-    }
   };
 
   const handlePrintBill = () => {
@@ -386,84 +324,84 @@ const BillHistory = () => {
                         />
                       </div>
                     </div>
-
+                    
                     <div className="flex flex-wrap items-end gap-4">
                       {/* Start Date */}
                       <div className="flex-1 min-w-[200px]">
                         <label className="text-sm font-medium mb-2 block">Start Date</label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className={cn(
-                                "w-full justify-start text-left font-normal",
-                                !startDate && "text-muted-foreground"
-                              )}
-                            >
-                              <Calendar className="mr-2 h-4 w-4" />
-                              {startDate ? format(startDate, "PPP") : <span>Pick a date</span>}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <CalendarComponent
-                              mode="single"
-                              selected={startDate}
-                              onSelect={(date) => handleDateChange(date, true)}
-                              initialFocus
-                              className="pointer-events-auto"
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      </div>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              "w-full justify-start text-left font-normal",
+                              !startDate && "text-muted-foreground"
+                            )}
+                          >
+                            <Calendar className="mr-2 h-4 w-4" />
+                            {startDate ? format(startDate, "PPP") : <span>Pick a date</span>}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <CalendarComponent
+                            mode="single"
+                            selected={startDate}
+                            onSelect={(date) => handleDateChange(date, true)}
+                            initialFocus
+                            className="pointer-events-auto"
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
 
-                      {/* End Date */}
-                      <div className="flex-1 min-w-[200px]">
-                        <label className="text-sm font-medium mb-2 block">End Date</label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className={cn(
-                                "w-full justify-start text-left font-normal",
-                                !endDate && "text-muted-foreground"
-                              )}
-                            >
-                              <Calendar className="mr-2 h-4 w-4" />
-                              {endDate ? format(endDate, "PPP") : <span>Pick a date</span>}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <CalendarComponent
-                              mode="single"
-                              selected={endDate}
-                              onSelect={(date) => handleDateChange(date, false)}
-                              initialFocus
-                              className="pointer-events-auto"
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      </div>
+                    {/* End Date */}
+                    <div className="flex-1 min-w-[200px]">
+                      <label className="text-sm font-medium mb-2 block">End Date</label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              "w-full justify-start text-left font-normal",
+                              !endDate && "text-muted-foreground"
+                            )}
+                          >
+                            <Calendar className="mr-2 h-4 w-4" />
+                            {endDate ? format(endDate, "PPP") : <span>Pick a date</span>}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <CalendarComponent
+                            mode="single"
+                            selected={endDate}
+                            onSelect={(date) => handleDateChange(date, false)}
+                            initialFocus
+                            className="pointer-events-auto"
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
 
-                      {/* Year Selector */}
-                      <div className="flex-1 min-w-[150px]">
-                        <label className="text-sm font-medium mb-2 block">Year</label>
-                        <Select value={selectedYear.toString()} onValueChange={handleYearChange}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select year" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {yearOptions.map((year) => (
-                              <SelectItem key={year} value={year.toString()}>
-                                {year}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    {/* Year Selector */}
+                    <div className="flex-1 min-w-[150px]">
+                      <label className="text-sm font-medium mb-2 block">Year</label>
+                      <Select value={selectedYear.toString()} onValueChange={handleYearChange}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select year" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {yearOptions.map((year) => (
+                            <SelectItem key={year} value={year.toString()}>
+                              {year}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
 
                       {/* Filter Buttons */}
                       <div className="flex gap-2">
-                        <Button
+                        <Button 
                           onClick={handleApplyFilter}
                           disabled={isFiltering}
                           className="gap-2"
@@ -471,7 +409,7 @@ const BillHistory = () => {
                           <Filter className="h-4 w-4" />
                           Apply Filter
                         </Button>
-                        <Button
+                        <Button 
                           variant="outline"
                           onClick={handleResetFilter}
                         >
@@ -492,7 +430,7 @@ const BillHistory = () => {
                       <TabsTrigger value="old-exchanges">Old Exchange Bills</TabsTrigger>
                     </TabsList>
                   </CardHeader>
-
+                  
                   <CardContent>
                     <TabsContent value="bills" className="mt-0">
                       <div className="mb-4">
@@ -615,7 +553,7 @@ const BillHistory = () => {
               </Card>
             </div>
           </main>
-
+          
           <Footer />
         </div>
       </div>
@@ -632,7 +570,7 @@ const BillHistory = () => {
               </Button>
             </DialogTitle>
           </DialogHeader>
-
+          
           {loadingDetails ? (
             <div className="text-center py-8">
               <p className="text-muted-foreground">Loading details...</p>
@@ -793,7 +731,7 @@ const BillHistory = () => {
               </Button>
             </DialogTitle>
           </DialogHeader>
-
+          
           {selectedExchange ? (
             <div className="space-y-4">
               {/* Exchange Header Info */}
@@ -849,7 +787,7 @@ const BillHistory = () => {
                       </>
                     )}
                   </div>
-
+                  
                   <div className="grid grid-cols-2 gap-4 pt-4 border-t">
                     <div>
                       <p className="text-sm text-muted-foreground mb-1">Initial Weight</p>
@@ -888,79 +826,31 @@ const BillHistory = () => {
       </Dialog>
 
       {/* Printable Exchange Bill - Hidden, only shows when printing */}
-      {selectedExchange && (() => {
-        // Get all exchanges for this bill/invoice
-        const exchangesToShow = allExchangesForBill.length > 0 ? allExchangesForBill : [selectedExchange];
-        const totalExchangeValue = exchangesToShow.reduce((sum, ex) => sum + ex.exchange_value, 0);
-        
-        // If there's a linked bill (buy-ornaments type), use its data
-        if (linkedBill && linkedBillItems.length > 0) {
-          return (
-            <PrintableBill
-              customerName={selectedExchange.customer_name}
-              customerPhone={selectedExchange.customer_phone || ""}
-              customerAddress={selectedExchange.customer_address || ""}
-              customerGstPan={selectedExchange.customer_gst_pan || ""}
-              billItems={linkedBillItems.map(item => ({
-                categoryName: item.category_name,
-                subcategoryName: item.subcategory_name || "",
-                weight: item.weight,
-                goldAmount: item.gold_amount,
-                seikuliAmount: item.seikuli_amount,
-                seikuliRate: item.seikuli_rate,
-                gstApplicable: true,
-              }))}
-              oldOrnaments={exchangesToShow.map(ex => ({
-                categoryName: ex.category_name,
-                subcategoryName: ex.subcategory_name || "",
-                initialWeight: ex.initial_weight,
-                finalWeight: ex.final_weight,
-                ratePerGram: ex.metal_rate,
-                value: ex.exchange_value,
-              }))}
-              goldRate={linkedBill.gold_rate || 0}
-              gstPercentage={linkedBill.gst_percentage || 0}
-              subtotal={linkedBill.subtotal}
-              gstAmount={linkedBill.gst_amount}
-              discountAmount={linkedBill.discount_amount || 0}
-              grandTotal={linkedBill.grand_total}
-              exchangeType="buy-ornaments"
-              invoiceNumber={selectedExchange.invoice_number}
-              creditedAmount={selectedExchange.credited_amount || 0}
-              remainingAmount={linkedBill.grand_total - (selectedExchange.credited_amount || 0)}
-            />
-          );
-        }
-        
-        // Cash exchange or standalone exchange
-        return (
-          <PrintableBill
-            customerName={selectedExchange.customer_name}
-            customerPhone={selectedExchange.customer_phone || ""}
-            customerAddress={selectedExchange.customer_address || ""}
-            customerGstPan={selectedExchange.customer_gst_pan || ""}
-            billItems={[]}
-            oldOrnaments={exchangesToShow.map(ex => ({
-              categoryName: ex.category_name,
-              subcategoryName: ex.subcategory_name || "",
-              initialWeight: ex.initial_weight,
-              finalWeight: ex.final_weight,
-              ratePerGram: ex.metal_rate,
-              value: ex.exchange_value,
-            }))}
-            goldRate={selectedExchange.metal_rate}
-            gstPercentage={0}
-            subtotal={0}
-            gstAmount={0}
-            discountAmount={0}
-            grandTotal={-totalExchangeValue}
-            exchangeType={selectedExchange.exchange_type}
-            invoiceNumber={selectedExchange.invoice_number}
-            creditedAmount={selectedExchange.credited_amount || 0}
-            remainingAmount={-totalExchangeValue}
-          />
-        );
-      })()}
+      {selectedExchange && (
+        <PrintableBill
+          customerName={selectedExchange.customer_name}
+          customerPhone=""
+          customerAddress=""
+          billItems={[]}
+          oldOrnaments={[{
+            categoryName: selectedExchange.category_name,
+            subcategoryName: selectedExchange.subcategory_name || "",
+            initialWeight: selectedExchange.initial_weight,
+            finalWeight: selectedExchange.final_weight,
+            ratePerGram: selectedExchange.metal_rate,
+            value: selectedExchange.exchange_value,
+          }]}
+          goldRate={0}
+          gstPercentage={0}
+          subtotal={0}
+          gstAmount={0}
+          grandTotal={0}
+          exchangeType={selectedExchange.exchange_type}
+          invoiceNumber={selectedExchange.invoice_number}
+          creditedAmount={0}
+          remainingAmount={0}
+        />
+      )}
     </SidebarProvider>
   );
 };

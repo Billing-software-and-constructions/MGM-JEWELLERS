@@ -155,17 +155,12 @@ export type Database = {
           category_id: string
           category_name: string
           created_at: string
-          credited_amount: number | null
-          customer_address: string | null
-          customer_gst_pan: string | null
           customer_name: string
-          customer_phone: string | null
           exchange_type: string
           exchange_value: number
           final_weight: number
           id: string
           initial_weight: number
-          invoice_number: string | null
           metal_rate: number
           subcategory_id: string | null
           subcategory_name: string | null
@@ -176,17 +171,12 @@ export type Database = {
           category_id: string
           category_name: string
           created_at?: string
-          credited_amount?: number | null
-          customer_address?: string | null
-          customer_gst_pan?: string | null
           customer_name: string
-          customer_phone?: string | null
           exchange_type: string
           exchange_value: number
           final_weight: number
           id?: string
           initial_weight: number
-          invoice_number?: string | null
           metal_rate: number
           subcategory_id?: string | null
           subcategory_name?: string | null
@@ -197,17 +187,12 @@ export type Database = {
           category_id?: string
           category_name?: string
           created_at?: string
-          credited_amount?: number | null
-          customer_address?: string | null
-          customer_gst_pan?: string | null
           customer_name?: string
-          customer_phone?: string | null
           exchange_type?: string
           exchange_value?: number
           final_weight?: number
           id?: string
           initial_weight?: number
-          invoice_number?: string | null
           metal_rate?: number
           subcategory_id?: string | null
           subcategory_name?: string | null
