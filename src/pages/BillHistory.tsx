@@ -757,7 +757,7 @@ const BillHistory = () => {
             goldAmount: item.gold_amount,
             seikuliAmount: item.seikuli_amount,
             seikuliRate: item.seikuli_rate,
-            gstApplicable: true,
+            gstApplicable: (selectedBill.gst_amount || 0) > 0,
           }))}
           oldOrnaments={[]}
           goldRate={selectedBill.gold_rate || 0}
@@ -897,7 +897,7 @@ const BillHistory = () => {
                 goldAmount: item.gold_amount,
                 seikuliAmount: item.seikuli_amount,
                 seikuliRate: item.seikuli_rate,
-                gstApplicable: true,
+                gstApplicable: (exchangeBill?.gst_amount || 0) > 0,
               }))
               : []
           }
