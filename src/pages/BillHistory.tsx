@@ -54,6 +54,9 @@ interface BillItem {
 interface OldExchange {
   id: string;
   customer_name: string;
+  customer_phone?: string;
+  customer_address?: string;
+  customer_gst_pan?: string;
   created_at: string;
   category_name: string;
   subcategory_name?: string;
@@ -64,6 +67,8 @@ interface OldExchange {
   exchange_type: string;
   bill_id?: string;
   invoice_number?: string;
+  credited_amount?: number;
+  discount_amount?: number;
 }
 
 const BillHistory = () => {
@@ -829,8 +834,9 @@ const BillHistory = () => {
       {selectedExchange && (
         <PrintableBill
           customerName={selectedExchange.customer_name}
-          customerPhone=""
-          customerAddress=""
+          customerPhone={selectedExchange.customer_phone || ""}
+          customerAddress={selectedExchange.customer_address || ""}
+          customerGstPan={selectedExchange.customer_gst_pan || ""}
           billItems={[]}
           oldOrnaments={[{
             categoryName: selectedExchange.category_name,
@@ -840,15 +846,16 @@ const BillHistory = () => {
             ratePerGram: selectedExchange.metal_rate,
             value: selectedExchange.exchange_value,
           }]}
-          goldRate={0}
+          goldRate={selectedExchange.metal_rate}
           gstPercentage={0}
           subtotal={0}
           gstAmount={0}
-          grandTotal={0}
+          discountAmount={selectedExchange.discount_amount || 0}
+          grandTotal={selectedExchange.exchange_value}
           exchangeType={selectedExchange.exchange_type}
           invoiceNumber={selectedExchange.invoice_number}
-          creditedAmount={0}
-          remainingAmount={0}
+          creditedAmount={selectedExchange.credited_amount || 0}
+          remainingAmount={(selectedExchange.exchange_value || 0) - (selectedExchange.credited_amount || 0)}
         />
       )}
     </SidebarProvider>
