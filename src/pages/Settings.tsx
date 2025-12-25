@@ -53,41 +53,6 @@ const Settings = () => {
     name: string;
   } | null>(null);
 
-  const fetchSettings = async () => {
-    const { data, error } = await supabase.from('settings').select('*').maybeSingle();
-    if (error) {
-      console.error('Error fetching settings:', error);
-    } else if (data) {
-      setGoldRate(data.gold_rate.toString());
-      setSilverRate(data.silver_rate?.toString() || "7000");
-      setGstRate(data.gst_rate?.toString() || "3");
-    } else {
-      // No settings exist, use defaults
-      setGoldRate("10000");
-      setSilverRate("7000");
-      setGstRate("3");
-    }
-    setLoading(false);
-  };
-
-  const fetchCategories = async () => {
-    const { data: categoriesData, error: categoriesError } = await supabase.from('categories').select('*').order('name');
-    if (categoriesError) {
-      console.error('Error fetching categories:', categoriesError);
-      return;
-    }
-    setCategories(categoriesData || []);
-  };
-
-  const fetchSubcategories = async () => {
-    const { data: subcategoriesData, error: subcategoriesError } = await supabase.from('subcategories').select('*').order('name');
-    if (subcategoriesError) {
-      console.error('Error fetching subcategories:', subcategoriesError);
-      return;
-    }
-    setSubcategories(subcategoriesData || []);
-  };
-
   // Fetch initial data
   useEffect(() => {
     fetchSettings();
@@ -122,33 +87,53 @@ const Settings = () => {
       supabase.removeChannel(subcategoriesChannel);
     };
   }, []);
-
-  const handleSaveRates = async () => {
-    // First check if settings row exists
-    const { data: existingSettings } = await supabase.from('settings').select('id').maybeSingle();
-    
-    let error;
-    if (existingSettings) {
-      // Update existing row
-      const result = await supabase.from('settings').update({
-        gold_rate: parseFloat(goldRate) || 10000,
-        silver_rate: parseFloat(silverRate) || 7000,
-        gst_rate: parseFloat(gstRate) || 3
-      }).eq('id', existingSettings.id);
-      error = result.error;
-    } else {
-      // Insert new row
-      const result = await supabase.from('settings').insert({
-        gold_rate: parseFloat(goldRate) || 10000,
-        silver_rate: parseFloat(silverRate) || 7000,
-        gst_rate: parseFloat(gstRate) || 3
-      });
-      error = result.error;
+  const fetchSettings = async () => {
+    const {
+      data,
+      error
+    } = await supabase.from('settings').select('*').single();
+    if (error) {
+      console.error('Error fetching settings:', error);
+    } else if (data) {
+      setGoldRate(data.gold_rate.toString());
+      setSilverRate((data as any).silver_rate?.toString() || "7000");
+      setGstRate((data as any).gst_rate?.toString() || "3");
     }
-    
+    setLoading(false);
+  };
+  const fetchCategories = async () => {
+    const {
+      data: categoriesData,
+      error: categoriesError
+    } = await supabase.from('categories').select('*').order('name');
+    if (categoriesError) {
+      console.error('Error fetching categories:', categoriesError);
+      return;
+    }
+    setCategories(categoriesData || []);
+  };
+
+  const fetchSubcategories = async () => {
+    const {
+      data: subcategoriesData,
+      error: subcategoriesError
+    } = await supabase.from('subcategories').select('*').order('name');
+    if (subcategoriesError) {
+      console.error('Error fetching subcategories:', subcategoriesError);
+      return;
+    }
+    setSubcategories(subcategoriesData || []);
+  };
+  const handleSaveRates = async () => {
+    const {
+      error
+    } = await supabase.from('settings').update({
+      gold_rate: parseFloat(goldRate),
+      silver_rate: parseFloat(silverRate),
+      gst_rate: parseFloat(gstRate)
+    }).eq('id', (await supabase.from('settings').select('id').single()).data?.id);
     if (error) {
       toast.error("Failed to update rates");
-      console.error('Error saving rates:', error);
     } else {
       toast.success("Rates have been saved successfully.");
     }

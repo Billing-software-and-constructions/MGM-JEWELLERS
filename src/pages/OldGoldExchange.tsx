@@ -446,9 +446,6 @@ const OldGoldExchange = () => {
       // Save all old exchange records
       const exchangesToInsert = oldOrnaments.map((ornament) => ({
         customer_name: customerName,
-        customer_phone: customerPhone,
-        customer_address: customerAddress,
-        customer_gst_pan: customerGstPan,
         category_id: ornament.categoryId,
         category_name: ornament.categoryName,
         subcategory_id: ornament.subcategoryId,
@@ -459,8 +456,6 @@ const OldGoldExchange = () => {
         exchange_value: ornament.value,
         exchange_type: activeTab === "buy-ornaments" ? "ornaments" : "cash",
         bill_id: billId,
-        credited_amount: creditedAmountValue,
-        discount_amount: discountValue,
       }));
 
       const { error: exchangeError } = await supabase
