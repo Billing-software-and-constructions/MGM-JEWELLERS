@@ -54,6 +54,9 @@ interface BillItem {
 interface OldExchange {
   id: string;
   customer_name: string;
+  customer_phone?: string;
+  customer_address?: string;
+  customer_gst_pan?: string;
   created_at: string;
   category_name: string;
   subcategory_name?: string;
@@ -64,6 +67,7 @@ interface OldExchange {
   exchange_type: string;
   bill_id?: string;
   invoice_number?: string;
+  credited_amount?: number;
 }
 
 const BillHistory = () => {
@@ -83,8 +87,7 @@ const BillHistory = () => {
   const [activeTab, setActiveTab] = useState<string>("bills");
   const [selectedExchange, setSelectedExchange] = useState<OldExchange | null>(null);
   const [isExchangeDialogOpen, setIsExchangeDialogOpen] = useState(false);
-  // State for exchange-linked bill data (for buy-ornaments type exchanges)
-  const [exchangeLinkedBill, setExchangeLinkedBill] = useState<Bill | null>(null);
+  const [exchangeBill, setExchangeBill] = useState<Bill | null>(null);
   const [exchangeBillItems, setExchangeBillItems] = useState<BillItem[]>([]);
 
   // Generate year options from 2020 to 2099
@@ -203,10 +206,10 @@ const BillHistory = () => {
 
       if (error) throw error;
 
-      // Map the data to include invoice_number at the top level
+      // Map the data - use invoice_number from old_exchanges first, fallback to bills table
       const mappedData = ((data as any) || []).map((exchange: any) => ({
         ...exchange,
-        invoice_number: exchange.bills?.invoice_number || null,
+        invoice_number: exchange.invoice_number || exchange.bills?.invoice_number || null,
         bills: undefined, // Remove nested bills object
       }));
 
@@ -288,39 +291,37 @@ const BillHistory = () => {
     setSelectedExchange(exchange);
     setIsExchangeDialogOpen(true);
 
-    // Reset linked bill data
-    setExchangeLinkedBill(null);
+    // Reset previous bill data
+    setExchangeBill(null);
     setExchangeBillItems([]);
 
-    // If this exchange has a linked bill (buy-ornaments type), fetch the bill and its items
-    if (exchange.bill_id) {
+    // If exchange type is "ornaments" and has a bill_id, fetch associated bill and items
+    if (exchange.exchange_type === "ornaments" && exchange.bill_id) {
       try {
-        // Fetch the linked bill
+        // Fetch associated bill
         const { data: billData, error: billError } = await supabase
           .from('bills' as any)
           .select('*')
           .eq('id', exchange.bill_id)
           .single();
 
-        if (billError) {
-          console.error('Error fetching linked bill:', billError);
-        } else if (billData) {
-          setExchangeLinkedBill(billData as unknown as Bill);
+        if (billError) throw billError;
 
-          // Fetch the bill items
+        if (billData) {
+          setExchangeBill(billData as unknown as Bill);
+
+          // Fetch associated bill items
           const { data: itemsData, error: itemsError } = await supabase
             .from('bill_items' as any)
             .select('*')
             .eq('bill_id', exchange.bill_id);
 
-          if (itemsError) {
-            console.error('Error fetching linked bill items:', itemsError);
-          } else {
-            setExchangeBillItems((itemsData as unknown as BillItem[]) || []);
-          }
+          if (itemsError) throw itemsError;
+
+          setExchangeBillItems((itemsData as any) || []);
         }
       } catch (error) {
-        console.error('Error loading linked bill data:', error);
+        console.error('Error loading associated bill data:', error);
       }
     }
   };
@@ -885,7 +886,21 @@ const BillHistory = () => {
           customerPhone={selectedExchange.customer_phone || ""}
           customerAddress={selectedExchange.customer_address || ""}
           customerGstPan={selectedExchange.customer_gst_pan || ""}
-          billItems={[]}
+          billItems={
+            selectedExchange.exchange_type === "ornaments" && exchangeBillItems.length > 0
+              ? exchangeBillItems.map(item => ({
+                // For new records: category_name has actual category, subcategory_name has subcategory
+                // For old records: category_name had subcategory, subcategory_name was null
+                categoryName: item.subcategory_name ? item.category_name : (selectedExchange.category_name || item.category_name),
+                subcategoryName: item.subcategory_name || item.category_name,
+                weight: item.weight,
+                goldAmount: item.gold_amount,
+                seikuliAmount: item.seikuli_amount,
+                seikuliRate: item.seikuli_rate,
+                gstApplicable: true,
+              }))
+              : []
+          }
           oldOrnaments={[{
             categoryName: selectedExchange.category_name,
             subcategoryName: selectedExchange.subcategory_name || "",
@@ -894,16 +909,34 @@ const BillHistory = () => {
             ratePerGram: selectedExchange.metal_rate,
             value: selectedExchange.exchange_value,
           }]}
-          goldRate={selectedExchange.metal_rate}
-          gstPercentage={0}
-          subtotal={0}
-          gstAmount={0}
-          discountAmount={0}
-          grandTotal={selectedExchange.exchange_type === "cash" ? selectedExchange.exchange_value : 0}
-          exchangeType={selectedExchange.exchange_type}
+          goldRate={exchangeBill?.gold_rate || selectedExchange.metal_rate}
+          gstPercentage={exchangeBill?.gst_percentage || 0}
+          subtotal={exchangeBill?.subtotal || 0}
+          gstAmount={exchangeBill?.gst_amount || 0}
+          discountAmount={exchangeBill?.discount_amount || 0}
+          grandTotal={
+            selectedExchange.exchange_type === "ornaments" && exchangeBill
+              ? exchangeBill.grand_total
+              : selectedExchange.exchange_type === "cash"
+                ? 0
+                : selectedExchange.exchange_value
+          }
+          exchangeType={selectedExchange.exchange_type === "ornaments" ? "buy-ornaments" : selectedExchange.exchange_type}
           invoiceNumber={selectedExchange.invoice_number}
-          creditedAmount={selectedExchange.credited_amount || 0}
-          remainingAmount={selectedExchange.exchange_type === "cash" ? (selectedExchange.exchange_value - (selectedExchange.credited_amount || 0)) : 0}
+          creditedAmount={
+            selectedExchange.exchange_type === "ornaments" && exchangeBill
+              ? (exchangeBill.credited_amount || 0)
+              : selectedExchange.exchange_type === "cash"
+                ? (selectedExchange.credited_amount || selectedExchange.exchange_value)
+                : (selectedExchange.credited_amount || 0)
+          }
+          remainingAmount={
+            selectedExchange.exchange_type === "ornaments" && exchangeBill
+              ? (exchangeBill.grand_total - (exchangeBill.credited_amount || 0))
+              : selectedExchange.exchange_type === "cash"
+                ? (selectedExchange.exchange_value - (selectedExchange.credited_amount || selectedExchange.exchange_value))
+                : 0
+          }
         />
       )}
     </SidebarProvider>
