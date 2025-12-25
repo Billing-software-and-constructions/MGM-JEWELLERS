@@ -178,18 +178,18 @@ const OldGoldExchange = () => {
       const updatedItems = billItems.map((item) =>
         item.id === editingItemId
           ? {
-            id: item.id,
-            categoryId: category.id,
-            subcategoryId: subcategory.id,
-            subcategoryName: subcategory.name,
-            categoryName: category.name,
-            weight,
-            goldAmount,
-            seikuliAmount,
-            seikuliRate: seikuliRate,
-            total,
-            gstApplicable: currentItem.gstApplicable,
-          }
+              id: item.id,
+              categoryId: category.id,
+              subcategoryId: subcategory.id,
+              subcategoryName: subcategory.name,
+              categoryName: category.name,
+              weight,
+              goldAmount,
+              seikuliAmount,
+              seikuliRate: seikuliRate,
+              total,
+              gstApplicable: currentItem.gstApplicable,
+            }
           : item
       );
       setBillItems(updatedItems);
@@ -271,16 +271,16 @@ const OldGoldExchange = () => {
       const updatedOldOrnaments = oldOrnaments.map((item) =>
         item.id === editingOldOrnamentId
           ? {
-            id: item.id,
-            categoryId: category.id,
-            subcategoryId: subcategory.id,
-            subcategoryName: subcategory.name,
-            categoryName: category.name,
-            initialWeight,
-            finalWeight,
-            ratePerGram,
-            value,
-          }
+              id: item.id,
+              categoryId: category.id,
+              subcategoryId: subcategory.id,
+              subcategoryName: subcategory.name,
+              categoryName: category.name,
+              initialWeight,
+              finalWeight,
+              ratePerGram,
+              value,
+            }
           : item
       );
       setOldOrnaments(updatedOldOrnaments);
@@ -348,20 +348,20 @@ const OldGoldExchange = () => {
     .filter((item) => item.gstApplicable)
     .reduce((sum, item) => sum + item.total, 0);
   const gstAmount = (gstApplicableTotal * gstPercentage) / 100;
-
+  
   const totalOldOrnamentValue = oldOrnaments.reduce((sum, item) => sum + item.value, 0);
-
+  
   // Calculate discount
   const discountValue = parseFloat(discountAmount) || 0;
-
+  
   // If buying ornaments, deduct old ornament value and discount from total. If cash, no items are added
-  const grandTotal = activeTab === "buy-ornaments"
+  const grandTotal = activeTab === "buy-ornaments" 
     ? subtotal + gstAmount - totalOldOrnamentValue - discountValue
     : 0;
 
   // Calculate remaining amount
   const creditedAmountValue = parseFloat(creditedAmount) || 0;
-  const remainingAmount = activeTab === "buy-ornaments"
+  const remainingAmount = activeTab === "buy-ornaments" 
     ? grandTotal - creditedAmountValue
     : totalOldOrnamentValue - creditedAmountValue;
 
@@ -390,7 +390,7 @@ const OldGoldExchange = () => {
         .from('settings' as any)
         .select('id, last_invoice_number')
         .single();
-
+      
       if (settingsError) throw settingsError;
 
       const nextInvoiceNumber = ((settingsData as any).last_invoice_number || 0) + 1;
@@ -443,13 +443,9 @@ const OldGoldExchange = () => {
         if (itemsError) throw itemsError;
       }
 
-
       // Save all old exchange records
       const exchangesToInsert = oldOrnaments.map((ornament) => ({
         customer_name: customerName,
-        customer_phone: customerPhone,
-        customer_address: customerAddress,
-        customer_gst_pan: customerGstPan,
         category_id: ornament.categoryId,
         category_name: ornament.categoryName,
         subcategory_id: ornament.subcategoryId,
@@ -460,8 +456,6 @@ const OldGoldExchange = () => {
         exchange_value: ornament.value,
         exchange_type: activeTab === "buy-ornaments" ? "ornaments" : "cash",
         bill_id: billId,
-        credited_amount: creditedAmountValue,
-        invoice_number: invoiceNumber,
       }));
 
       const { error: exchangeError } = await supabase
@@ -770,7 +764,7 @@ const OldGoldExchange = () => {
                           <TabsTrigger value="get-cash">Get Cash</TabsTrigger>
                           <TabsTrigger value="buy-ornaments">Buy Ornaments</TabsTrigger>
                         </TabsList>
-
+                        
                         <TabsContent value="get-cash" className="space-y-3 mt-4">
                           <div className="p-4 bg-muted/50 rounded-lg text-center">
                             <p className="text-sm text-muted-foreground mb-2">
@@ -1019,7 +1013,7 @@ const OldGoldExchange = () => {
                           />
                         </div>
                       </div>
-                      <div className="flex justify-between items-center pt-2">
+                       <div className="flex justify-between items-center pt-2">
                         <span className="text-base font-semibold">
                           {activeTab === "get-cash" ? "Cash Amount" : "Grand Total"}
                         </span>

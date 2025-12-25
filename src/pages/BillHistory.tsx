@@ -54,9 +54,6 @@ interface BillItem {
 interface OldExchange {
   id: string;
   customer_name: string;
-  customer_phone?: string;
-  customer_address?: string;
-  customer_gst_pan?: string;
   created_at: string;
   category_name: string;
   subcategory_name?: string;
@@ -67,7 +64,6 @@ interface OldExchange {
   exchange_type: string;
   bill_id?: string;
   invoice_number?: string;
-  credited_amount?: number;
 }
 
 const BillHistory = () => {
@@ -207,10 +203,10 @@ const BillHistory = () => {
 
       if (error) throw error;
 
-      // Map the data - use invoice_number from old_exchanges first, fallback to bills table
+      // Map the data to include invoice_number at the top level
       const mappedData = ((data as any) || []).map((exchange: any) => ({
         ...exchange,
-        invoice_number: exchange.invoice_number || exchange.bills?.invoice_number || null,
+        invoice_number: exchange.bills?.invoice_number || null,
         bills: undefined, // Remove nested bills object
       }));
 
@@ -889,15 +885,7 @@ const BillHistory = () => {
           customerPhone={selectedExchange.customer_phone || ""}
           customerAddress={selectedExchange.customer_address || ""}
           customerGstPan={selectedExchange.customer_gst_pan || ""}
-          billItems={exchangeBillItems.map(item => ({
-            categoryName: item.category_name,
-            subcategoryName: (item as any).subcategory_name || "",
-            weight: item.weight,
-            goldAmount: item.gold_amount,
-            seikuliAmount: item.seikuli_amount,
-            seikuliRate: item.seikuli_rate,
-            gstApplicable: true,
-          }))}
+          billItems={[]}
           oldOrnaments={[{
             categoryName: selectedExchange.category_name,
             subcategoryName: selectedExchange.subcategory_name || "",
@@ -906,22 +894,16 @@ const BillHistory = () => {
             ratePerGram: selectedExchange.metal_rate,
             value: selectedExchange.exchange_value,
           }]}
-          goldRate={exchangeLinkedBill?.gold_rate || selectedExchange.metal_rate}
-          gstPercentage={exchangeLinkedBill?.gst_percentage || 0}
-          subtotal={exchangeLinkedBill?.subtotal || 0}
-          gstAmount={exchangeLinkedBill?.gst_amount || 0}
-          discountAmount={exchangeLinkedBill?.discount_amount || 0}
-          grandTotal={exchangeLinkedBill?.grand_total || (selectedExchange.exchange_type === "cash" ? selectedExchange.exchange_value : 0)}
+          goldRate={selectedExchange.metal_rate}
+          gstPercentage={0}
+          subtotal={0}
+          gstAmount={0}
+          discountAmount={0}
+          grandTotal={selectedExchange.exchange_type === "cash" ? selectedExchange.exchange_value : 0}
           exchangeType={selectedExchange.exchange_type}
           invoiceNumber={selectedExchange.invoice_number}
-          creditedAmount={exchangeLinkedBill?.credited_amount || selectedExchange.credited_amount || 0}
-          remainingAmount={
-            exchangeLinkedBill
-              ? (exchangeLinkedBill.grand_total - (exchangeLinkedBill.credited_amount || 0))
-              : (selectedExchange.exchange_type === "cash"
-                ? (selectedExchange.exchange_value - (selectedExchange.credited_amount || 0))
-                : 0)
-          }
+          creditedAmount={selectedExchange.credited_amount || 0}
+          remainingAmount={selectedExchange.exchange_type === "cash" ? (selectedExchange.exchange_value - (selectedExchange.credited_amount || 0)) : 0}
         />
       )}
     </SidebarProvider>
