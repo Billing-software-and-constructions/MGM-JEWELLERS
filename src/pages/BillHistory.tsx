@@ -87,6 +87,9 @@ const BillHistory = () => {
   const [activeTab, setActiveTab] = useState<string>("bills");
   const [selectedExchange, setSelectedExchange] = useState<OldExchange | null>(null);
   const [isExchangeDialogOpen, setIsExchangeDialogOpen] = useState(false);
+  // State for exchange-linked bill data (for buy-ornaments type exchanges)
+  const [exchangeLinkedBill, setExchangeLinkedBill] = useState<Bill | null>(null);
+  const [exchangeBillItems, setExchangeBillItems] = useState<BillItem[]>([]);
 
   // Generate year options from 2020 to 2099
   const yearOptions = Array.from({ length: 80 }, (_, i) => 2020 + i);
@@ -144,6 +147,15 @@ const BillHistory = () => {
       const startOfDayISO = startOfDay(startDate).toISOString();
       const endOfDayISO = endOfDay(endDate).toISOString();
 
+      // First, get all bill IDs that have linked old_exchange records
+      // These should only appear in Old Exchange Bills, not Regular Bills
+      const { data: exchangeLinkedBills } = await supabase
+        .from('old_exchanges' as any)
+        .select('bill_id')
+        .not('bill_id', 'is', null);
+
+      const linkedBillIds = (exchangeLinkedBills || []).map((e: any) => e.bill_id).filter(Boolean);
+
       let query = supabase
         .from('bills' as any)
         .select('*')
@@ -159,7 +171,12 @@ const BillHistory = () => {
 
       if (error) throw error;
 
-      setBills((data as any) || []);
+      // Filter out bills that are linked to old exchanges
+      const filteredBills = ((data as any) || []).filter(
+        (bill: any) => !linkedBillIds.includes(bill.id)
+      );
+
+      setBills(filteredBills);
     } catch (error) {
       console.error('Error loading bills:', error);
       toast.error("Failed to load bills");
@@ -271,9 +288,45 @@ const BillHistory = () => {
     }
   };
 
-  const handleViewExchangeDetails = (exchange: OldExchange) => {
+  const handleViewExchangeDetails = async (exchange: OldExchange) => {
     setSelectedExchange(exchange);
     setIsExchangeDialogOpen(true);
+
+    // Reset linked bill data
+    setExchangeLinkedBill(null);
+    setExchangeBillItems([]);
+
+    // If this exchange has a linked bill (buy-ornaments type), fetch the bill and its items
+    if (exchange.bill_id) {
+      try {
+        // Fetch the linked bill
+        const { data: billData, error: billError } = await supabase
+          .from('bills' as any)
+          .select('*')
+          .eq('id', exchange.bill_id)
+          .single();
+
+        if (billError) {
+          console.error('Error fetching linked bill:', billError);
+        } else if (billData) {
+          setExchangeLinkedBill(billData as unknown as Bill);
+
+          // Fetch the bill items
+          const { data: itemsData, error: itemsError } = await supabase
+            .from('bill_items' as any)
+            .select('*')
+            .eq('bill_id', exchange.bill_id);
+
+          if (itemsError) {
+            console.error('Error fetching linked bill items:', itemsError);
+          } else {
+            setExchangeBillItems((itemsData as unknown as BillItem[]) || []);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading linked bill data:', error);
+      }
+    }
   };
 
   const handlePrintBill = () => {
@@ -836,7 +889,15 @@ const BillHistory = () => {
           customerPhone={selectedExchange.customer_phone || ""}
           customerAddress={selectedExchange.customer_address || ""}
           customerGstPan={selectedExchange.customer_gst_pan || ""}
-          billItems={[]}
+          billItems={exchangeBillItems.map(item => ({
+            categoryName: item.category_name,
+            subcategoryName: (item as any).subcategory_name || "",
+            weight: item.weight,
+            goldAmount: item.gold_amount,
+            seikuliAmount: item.seikuli_amount,
+            seikuliRate: item.seikuli_rate,
+            gstApplicable: true,
+          }))}
           oldOrnaments={[{
             categoryName: selectedExchange.category_name,
             subcategoryName: selectedExchange.subcategory_name || "",
@@ -845,16 +906,22 @@ const BillHistory = () => {
             ratePerGram: selectedExchange.metal_rate,
             value: selectedExchange.exchange_value,
           }]}
-          goldRate={selectedExchange.metal_rate}
-          gstPercentage={0}
-          subtotal={0}
-          gstAmount={0}
-          discountAmount={0}
-          grandTotal={selectedExchange.exchange_type === "cash" ? selectedExchange.exchange_value : 0}
+          goldRate={exchangeLinkedBill?.gold_rate || selectedExchange.metal_rate}
+          gstPercentage={exchangeLinkedBill?.gst_percentage || 0}
+          subtotal={exchangeLinkedBill?.subtotal || 0}
+          gstAmount={exchangeLinkedBill?.gst_amount || 0}
+          discountAmount={exchangeLinkedBill?.discount_amount || 0}
+          grandTotal={exchangeLinkedBill?.grand_total || (selectedExchange.exchange_type === "cash" ? selectedExchange.exchange_value : 0)}
           exchangeType={selectedExchange.exchange_type}
           invoiceNumber={selectedExchange.invoice_number}
-          creditedAmount={selectedExchange.credited_amount || 0}
-          remainingAmount={selectedExchange.exchange_type === "cash" ? (selectedExchange.exchange_value - (selectedExchange.credited_amount || 0)) : 0}
+          creditedAmount={exchangeLinkedBill?.credited_amount || selectedExchange.credited_amount || 0}
+          remainingAmount={
+            exchangeLinkedBill
+              ? (exchangeLinkedBill.grand_total - (exchangeLinkedBill.credited_amount || 0))
+              : (selectedExchange.exchange_type === "cash"
+                ? (selectedExchange.exchange_value - (selectedExchange.credited_amount || 0))
+                : 0)
+          }
         />
       )}
     </SidebarProvider>
