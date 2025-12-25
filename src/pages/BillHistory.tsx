@@ -271,9 +271,67 @@ const BillHistory = () => {
     }
   };
 
-  const handleViewExchangeDetails = (exchange: OldExchange) => {
+  // State for linked bill data when viewing old exchange
+  const [linkedBill, setLinkedBill] = useState<Bill | null>(null);
+  const [linkedBillItems, setLinkedBillItems] = useState<BillItem[]>([]);
+  const [allExchangesForBill, setAllExchangesForBill] = useState<OldExchange[]>([]);
+
+  const handleViewExchangeDetails = async (exchange: OldExchange) => {
     setSelectedExchange(exchange);
     setIsExchangeDialogOpen(true);
+    setLinkedBill(null);
+    setLinkedBillItems([]);
+    setAllExchangesForBill([]);
+
+    // If this exchange has a linked bill, fetch the bill and its items
+    if (exchange.bill_id) {
+      try {
+        // Fetch linked bill
+        const { data: billData, error: billError } = await supabase
+          .from('bills' as any)
+          .select('*')
+          .eq('id', exchange.bill_id)
+          .single();
+
+        if (!billError && billData) {
+          setLinkedBill(billData as unknown as Bill);
+
+          // Fetch bill items
+          const { data: itemsData, error: itemsError } = await supabase
+            .from('bill_items' as any)
+            .select('*')
+            .eq('bill_id', exchange.bill_id);
+
+          if (!itemsError && itemsData) {
+            setLinkedBillItems(itemsData as unknown as BillItem[]);
+          }
+        }
+
+        // Fetch all old exchanges linked to the same bill (for multiple exchanges)
+        const { data: exchangesData, error: exchangesError } = await supabase
+          .from('old_exchanges' as any)
+          .select('*')
+          .eq('bill_id', exchange.bill_id);
+
+        if (!exchangesError && exchangesData) {
+          setAllExchangesForBill(exchangesData as unknown as OldExchange[]);
+        }
+      } catch (error) {
+        console.error('Error fetching linked bill data:', error);
+      }
+    } else {
+      // Fetch all exchanges with same invoice_number for standalone cash exchanges
+      if (exchange.invoice_number) {
+        const { data: exchangesData } = await supabase
+          .from('old_exchanges' as any)
+          .select('*')
+          .eq('invoice_number', exchange.invoice_number);
+
+        if (exchangesData) {
+          setAllExchangesForBill(exchangesData as unknown as OldExchange[]);
+        }
+      }
+    }
   };
 
   const handlePrintBill = () => {
@@ -830,33 +888,79 @@ const BillHistory = () => {
       </Dialog>
 
       {/* Printable Exchange Bill - Hidden, only shows when printing */}
-      {selectedExchange && (
-        <PrintableBill
-          customerName={selectedExchange.customer_name}
-          customerPhone={selectedExchange.customer_phone || ""}
-          customerAddress={selectedExchange.customer_address || ""}
-          customerGstPan={selectedExchange.customer_gst_pan || ""}
-          billItems={[]}
-          oldOrnaments={[{
-            categoryName: selectedExchange.category_name,
-            subcategoryName: selectedExchange.subcategory_name || "",
-            initialWeight: selectedExchange.initial_weight,
-            finalWeight: selectedExchange.final_weight,
-            ratePerGram: selectedExchange.metal_rate,
-            value: selectedExchange.exchange_value,
-          }]}
-          goldRate={selectedExchange.metal_rate}
-          gstPercentage={0}
-          subtotal={0}
-          gstAmount={0}
-          discountAmount={0}
-          grandTotal={selectedExchange.exchange_type === "cash" ? selectedExchange.exchange_value : 0}
-          exchangeType={selectedExchange.exchange_type}
-          invoiceNumber={selectedExchange.invoice_number}
-          creditedAmount={selectedExchange.credited_amount || 0}
-          remainingAmount={selectedExchange.exchange_type === "cash" ? (selectedExchange.exchange_value - (selectedExchange.credited_amount || 0)) : 0}
-        />
-      )}
+      {selectedExchange && (() => {
+        // Get all exchanges for this bill/invoice
+        const exchangesToShow = allExchangesForBill.length > 0 ? allExchangesForBill : [selectedExchange];
+        const totalExchangeValue = exchangesToShow.reduce((sum, ex) => sum + ex.exchange_value, 0);
+        
+        // If there's a linked bill (buy-ornaments type), use its data
+        if (linkedBill && linkedBillItems.length > 0) {
+          return (
+            <PrintableBill
+              customerName={selectedExchange.customer_name}
+              customerPhone={selectedExchange.customer_phone || ""}
+              customerAddress={selectedExchange.customer_address || ""}
+              customerGstPan={selectedExchange.customer_gst_pan || ""}
+              billItems={linkedBillItems.map(item => ({
+                categoryName: item.category_name,
+                subcategoryName: item.subcategory_name || "",
+                weight: item.weight,
+                goldAmount: item.gold_amount,
+                seikuliAmount: item.seikuli_amount,
+                seikuliRate: item.seikuli_rate,
+                gstApplicable: true,
+              }))}
+              oldOrnaments={exchangesToShow.map(ex => ({
+                categoryName: ex.category_name,
+                subcategoryName: ex.subcategory_name || "",
+                initialWeight: ex.initial_weight,
+                finalWeight: ex.final_weight,
+                ratePerGram: ex.metal_rate,
+                value: ex.exchange_value,
+              }))}
+              goldRate={linkedBill.gold_rate || 0}
+              gstPercentage={linkedBill.gst_percentage || 0}
+              subtotal={linkedBill.subtotal}
+              gstAmount={linkedBill.gst_amount}
+              discountAmount={linkedBill.discount_amount || 0}
+              grandTotal={linkedBill.grand_total}
+              exchangeType="buy-ornaments"
+              invoiceNumber={selectedExchange.invoice_number}
+              creditedAmount={selectedExchange.credited_amount || 0}
+              remainingAmount={linkedBill.grand_total - (selectedExchange.credited_amount || 0)}
+            />
+          );
+        }
+        
+        // Cash exchange or standalone exchange
+        return (
+          <PrintableBill
+            customerName={selectedExchange.customer_name}
+            customerPhone={selectedExchange.customer_phone || ""}
+            customerAddress={selectedExchange.customer_address || ""}
+            customerGstPan={selectedExchange.customer_gst_pan || ""}
+            billItems={[]}
+            oldOrnaments={exchangesToShow.map(ex => ({
+              categoryName: ex.category_name,
+              subcategoryName: ex.subcategory_name || "",
+              initialWeight: ex.initial_weight,
+              finalWeight: ex.final_weight,
+              ratePerGram: ex.metal_rate,
+              value: ex.exchange_value,
+            }))}
+            goldRate={selectedExchange.metal_rate}
+            gstPercentage={0}
+            subtotal={0}
+            gstAmount={0}
+            discountAmount={0}
+            grandTotal={-totalExchangeValue}
+            exchangeType={selectedExchange.exchange_type}
+            invoiceNumber={selectedExchange.invoice_number}
+            creditedAmount={selectedExchange.credited_amount || 0}
+            remainingAmount={-totalExchangeValue}
+          />
+        );
+      })()}
     </SidebarProvider>
   );
 };
