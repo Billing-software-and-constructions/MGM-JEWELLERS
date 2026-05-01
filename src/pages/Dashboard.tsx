@@ -5,7 +5,9 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/db";
+import { settings as settingsTable, categories as categoriesTable, bills as billsTable, old_exchanges as oldExchangesTable } from "@/db/schema";
+import { count, gte, lt, and } from "drizzle-orm";
 import { Skeleton } from "@/components/ui/skeleton";
 import { startOfDay, endOfDay } from "date-fns";
 
@@ -14,24 +16,21 @@ const Dashboard = () => {
   const { data: settings, isLoading: settingsLoading } = useQuery({
     queryKey: ["settings"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("settings").select("*").single();
-      if (error) throw error;
-      return data;
+      const result = await db.select().from(settingsTable).limit(1);
+      if (result.length === 0) throw new Error("No settings found");
+      return result[0];
     },
-    refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
+    refetchInterval: 3000,
   });
 
   // Fetch categories count
   const { data: categoriesCount, isLoading: categoriesLoading } = useQuery({
     queryKey: ["categories-count"],
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from("categories")
-        .select("*", { count: "exact", head: true });
-      if (error) throw error;
-      return count || 0;
+      const result = await db.select({ value: count() }).from(categoriesTable);
+      return result[0].value || 0;
     },
-    refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
+    refetchInterval: 3000,
   });
 
   // Fetch bills count for today
@@ -43,16 +42,19 @@ const Dashboard = () => {
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
 
-      const { count, error } = await supabase
-        .from("bills")
-        .select("*", { count: "exact", head: true })
-        .gte("bill_date", today.toISOString())
-        .lt("bill_date", tomorrow.toISOString());
+      const result = await db
+        .select({ value: count() })
+        .from(billsTable)
+        .where(
+          and(
+            gte(billsTable.bill_date, today),
+            lt(billsTable.bill_date, tomorrow)
+          )
+        );
       
-      if (error) throw error;
-      return count || 0;
+      return result[0].value || 0;
     },
-    refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
+    refetchInterval: 3000,
   });
 
   // Fetch old exchange bills count for today
@@ -64,16 +66,19 @@ const Dashboard = () => {
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
 
-      const { count, error } = await supabase
-        .from("old_exchanges")
-        .select("*", { count: "exact", head: true })
-        .gte("created_at", today.toISOString())
-        .lt("created_at", tomorrow.toISOString());
+      const result = await db
+        .select({ value: count() })
+        .from(oldExchangesTable)
+        .where(
+          and(
+            gte(oldExchangesTable.created_at, today),
+            lt(oldExchangesTable.created_at, tomorrow)
+          )
+        );
       
-      if (error) throw error;
-      return count || 0;
+      return result[0].value || 0;
     },
-    refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
+    refetchInterval: 3000,
   });
 
   const quickStats = [

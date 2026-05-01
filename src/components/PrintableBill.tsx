@@ -32,6 +32,7 @@ interface PrintableBillProps {
   grandTotal: number;
   exchangeType: string;
   invoiceNumber?: string;
+  billDate?: Date | string;
   creditedAmount?: number;
   remainingAmount?: number;
 }
@@ -52,6 +53,7 @@ export const PrintableBill = ({
   grandTotal,
   exchangeType,
   invoiceNumber,
+  billDate,
   creditedAmount = 0,
   remainingAmount = 0,
 }: PrintableBillProps) => {
@@ -115,11 +117,11 @@ export const PrintableBill = ({
               <tbody>
                 <tr>
                   <td className="font-semibold py-1">SI No of Invoice</td>
-                  <td className="py-1">: {invoiceNumber || `MGM_${format(new Date(), "yyyyMMddHHmmss")}`}</td>
+                  <td className="py-1">: {invoiceNumber || `MGM_${format(billDate ? new Date(billDate) : new Date(), "yyyyMMddHHmmss")}`}</td>
                 </tr>
                 <tr>
                   <td className="font-semibold py-1">Date of Invoice</td>
-                  <td className="py-1">: {format(new Date(), "dd/MM/yyyy")}</td>
+                  <td className="py-1">: {format(billDate ? new Date(billDate) : new Date(), "dd/MM/yyyy")}</td>
                 </tr>
               </tbody>
             </table>

@@ -6,9 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Trash2, Printer, Pencil } from "lucide-react";
+import { Plus, Trash2, Printer, Pencil, ArrowRightLeft, History, Coins, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/db";
+import { settings as settingsTable, categories as categoriesTable, subcategories as subcategoriesTable, bills as billsTable, bill_items as billItemsTable, old_exchanges as oldExchangesTable } from "@/db/schema";
+import { eq, asc } from "drizzle-orm";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PrintableBill } from "@/components/PrintableBill";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -69,6 +71,7 @@ const OldGoldExchange = () => {
   const [billItems, setBillItems] = useState<BillItem[]>([]);
   const [oldOrnaments, setOldOrnaments] = useState<OldOrnamentItem[]>([]);
   const [currentInvoiceNumber, setCurrentInvoiceNumber] = useState<string>("");
+  const [isSaving, setIsSaving] = useState(false);
   const [currentItem, setCurrentItem] = useState({
     categoryId: "",
     subcategoryId: "",
@@ -88,33 +91,12 @@ const OldGoldExchange = () => {
   useEffect(() => {
     fetchData();
 
-    // Real-time subscriptions
-    const settingsChannel = supabase
-      .channel('old-gold-settings')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => {
-        fetchSettings();
-      })
-      .subscribe();
+    // Set up polling to keep data in sync
+    const interval = setInterval(() => {
+      fetchData();
+    }, 3000);
 
-    const categoriesChannel = supabase
-      .channel('old-gold-categories')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
-        fetchCategories();
-      })
-      .subscribe();
-
-    const subcategoriesChannel = supabase
-      .channel('old-gold-subcategories')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcategories' }, () => {
-        fetchSubcategories();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(settingsChannel);
-      supabase.removeChannel(categoriesChannel);
-      supabase.removeChannel(subcategoriesChannel);
-    };
+    return () => clearInterval(interval);
   }, []);
 
   const fetchData = async () => {
@@ -123,29 +105,23 @@ const OldGoldExchange = () => {
   };
 
   const fetchSettings = async () => {
-    const { data } = await supabase.from('settings').select('*').single();
-    if (data) {
-      setGoldRate(Number(data.gold_rate));
-      setSilverRate(Number((data as any).silver_rate) || 7000);
-      setGstPercentage(Number((data as any).gst_rate) || 3);
+    const data = await db.select().from(settingsTable).limit(1);
+    if (data.length > 0) {
+      setGoldRate(Number(data[0].gold_rate));
+      setSilverRate(Number((data[0] as any).silver_rate) || 7000);
+      setGstPercentage(Number((data[0] as any).gst_rate) || 3);
     }
   };
 
   const fetchCategories = async () => {
-    const { data: categoriesData } = await supabase
-      .from('categories')
-      .select('*')
-      .order('name');
+    const categoriesData = await db.select().from(categoriesTable).orderBy(asc(categoriesTable.name));
     if (categoriesData) {
       setCategories(categoriesData);
     }
   };
 
   const fetchSubcategories = async () => {
-    const { data: subcategoriesData } = await supabase
-      .from('subcategories')
-      .select('*')
-      .order('name');
+    const subcategoriesData = await db.select().from(subcategoriesTable).orderBy(asc(subcategoriesTable.name));
     if (subcategoriesData) {
       setSubcategories(subcategoriesData);
     }
@@ -381,42 +357,35 @@ const OldGoldExchange = () => {
       return;
     }
 
+    setIsSaving(true);
     try {
       let billId = null;
       let invoiceNumber = "";
 
       // ALWAYS generate invoice number for all transactions
-      const { data: settingsData, error: settingsError } = await supabase
-        .from('settings' as any)
-        .select('id, last_invoice_number')
-        .single();
+      const settingsData = await db.select({ id: settingsTable.id, last_invoice_number: settingsTable.last_invoice_number }).from(settingsTable).limit(1);
 
-      if (settingsError) throw settingsError;
+      if (settingsData.length === 0) throw new Error("Settings not found");
 
-      const nextInvoiceNumber = ((settingsData as any).last_invoice_number || 0) + 1;
+      const nextInvoiceNumber = (settingsData[0].last_invoice_number || 0) + 1;
       invoiceNumber = `MGM_${nextInvoiceNumber}`;
 
       // Set the invoice number for display
       setCurrentInvoiceNumber(invoiceNumber);
 
       // Update last invoice number in settings
-      const { error: updateError } = await supabase
-        .from('settings' as any)
-        .update({ last_invoice_number: nextInvoiceNumber })
-        .eq('id', (settingsData as any).id);
-
-      if (updateError) throw updateError;
+      await db.update(settingsTable).set({ last_invoice_number: nextInvoiceNumber }).where(eq(settingsTable.id, settingsData[0].id));
 
       // Save bill only if buying ornaments
       if (activeTab === "buy-ornaments" && billItems.length > 0) {
-        const { data: billData, error: billError } = await supabase
-          .from('bills')
-          .insert({
+        const billDataArr = await db
+          .insert(billsTable)
+          .values({
             customer_name: customerName,
             customer_phone: customerPhone,
             customer_address: customerAddress,
             customer_gst_pan: customerGstPan,
-            bill_date: new Date().toISOString(),
+            bill_date: new Date(),
             gold_rate: goldRate,
             gst_percentage: gstPercentage,
             subtotal: subtotal,
@@ -426,15 +395,13 @@ const OldGoldExchange = () => {
             invoice_number: invoiceNumber,
             credited_amount: creditedAmountValue,
           })
-          .select()
-          .single();
+          .returning();
 
-        if (billError || !billData) throw billError || new Error('No data returned');
-        billId = billData.id;
+        billId = billDataArr[0].id;
 
         // Save bill items
         const itemsToInsert = billItems.map((item) => ({
-          bill_id: billData.id,
+          bill_id: billId,
           category_id: item.categoryId,
           category_name: item.categoryName,
           subcategory_name: item.subcategoryName,
@@ -445,8 +412,7 @@ const OldGoldExchange = () => {
           total: item.total,
         }));
 
-        const { error: itemsError } = await supabase.from('bill_items').insert(itemsToInsert);
-        if (itemsError) throw itemsError;
+        await db.insert(billItemsTable).values(itemsToInsert as any);
       }
 
       // Save all old exchange records
@@ -469,11 +435,7 @@ const OldGoldExchange = () => {
         invoice_number: invoiceNumber,
       }));
 
-      const { error: exchangeError } = await supabase
-        .from('old_exchanges')
-        .insert(exchangesToInsert);
-
-      if (exchangeError) throw exchangeError;
+      await db.insert(oldExchangesTable).values(exchangesToInsert as any);
 
       toast.success(`Bill for ${customerName} has been saved`);
 
@@ -495,6 +457,8 @@ const OldGoldExchange = () => {
     } catch (error) {
       console.error('Error saving bill:', error);
       toast.error("Failed to save bill. Please try again.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -653,11 +617,16 @@ const OldGoldExchange = () => {
                             <Label htmlFor="initialWeight" className="text-sm">Initial Weight (grams)</Label>
                             <Input
                               id="initialWeight"
-                              type="number"
-                              step="0.01"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="Enter initial weight"
                               value={currentOldOrnament.initialWeight}
-                              onChange={(e) => setCurrentOldOrnament({ ...currentOldOrnament, initialWeight: e.target.value })}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                                  setCurrentOldOrnament({ ...currentOldOrnament, initialWeight: val });
+                                }
+                              }}
                               className="h-9"
                             />
                           </div>
@@ -665,11 +634,16 @@ const OldGoldExchange = () => {
                             <Label htmlFor="finalWeight" className="text-sm">Final Weight (grams)</Label>
                             <Input
                               id="finalWeight"
-                              type="number"
-                              step="0.01"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="Enter final weight"
                               value={currentOldOrnament.finalWeight}
-                              onChange={(e) => setCurrentOldOrnament({ ...currentOldOrnament, finalWeight: e.target.value })}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                                  setCurrentOldOrnament({ ...currentOldOrnament, finalWeight: val });
+                                }
+                              }}
                               className="h-9"
                             />
                           </div>
@@ -678,11 +652,16 @@ const OldGoldExchange = () => {
                           <Label htmlFor="ratePerGram" className="text-sm">Rate Per Gram (₹)</Label>
                           <Input
                             id="ratePerGram"
-                            type="number"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             placeholder="Enter rate per gram"
                             value={currentOldOrnament.ratePerGram}
-                            onChange={(e) => setCurrentOldOrnament({ ...currentOldOrnament, ratePerGram: e.target.value })}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                                setCurrentOldOrnament({ ...currentOldOrnament, ratePerGram: val });
+                              }
+                            }}
                             className="h-9"
                           />
                         </div>
@@ -792,11 +771,16 @@ const OldGoldExchange = () => {
                               <Label htmlFor="creditedAmountCash" className="text-sm">Credited Amount (Cash Paid)</Label>
                               <Input
                                 id="creditedAmountCash"
-                                type="number"
-                                step="0.01"
+                                type="text"
+                                inputMode="decimal"
                                 placeholder="Enter credited amount"
                                 value={creditedAmount}
-                                onChange={(e) => setCreditedAmount(e.target.value)}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                                    setCreditedAmount(val);
+                                  }
+                                }}
                                 className="h-9"
                               />
                             </div>
@@ -874,13 +858,16 @@ const OldGoldExchange = () => {
                             <Label htmlFor="weight" className="text-sm">Weight (grams)</Label>
                             <Input
                               id="weight"
-                              type="number"
-                              step="0.01"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="2.5"
                               value={currentItem.weight}
-                              onChange={(e) =>
-                                setCurrentItem({ ...currentItem, weight: e.target.value })
-                              }
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                                  setCurrentItem({ ...currentItem, weight: val });
+                                }
+                              }}
                               className="h-9"
                             />
                           </div>
@@ -900,11 +887,16 @@ const OldGoldExchange = () => {
                             <Label htmlFor="creditedAmountOrnaments" className="text-sm">Credited Amount (Cash Paid)</Label>
                             <Input
                               id="creditedAmountOrnaments"
-                              type="number"
-                              step="0.01"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="Enter credited amount"
                               value={creditedAmount}
-                              onChange={(e) => setCreditedAmount(e.target.value)}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                                  setCreditedAmount(val);
+                                }
+                              }}
                               className="h-9"
                             />
                           </div>
@@ -1015,11 +1007,16 @@ const OldGoldExchange = () => {
                           <Label htmlFor="discountAmount" className="text-sm">Discount Amount</Label>
                           <Input
                             id="discountAmount"
-                            type="number"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             placeholder="Enter discount amount"
                             value={discountAmount}
-                            onChange={(e) => setDiscountAmount(e.target.value)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                                setDiscountAmount(val);
+                              }
+                            }}
                             className="h-9"
                           />
                         </div>
@@ -1046,11 +1043,15 @@ const OldGoldExchange = () => {
                       )}
                       <Button
                         onClick={handlePrintBill}
-                        className="w-full gap-2 h-10"
-                        disabled={!customerName || oldOrnaments.length === 0}
+                        disabled={isSaving || !customerName || oldOrnaments.length === 0}
+                        className="w-full gap-2 bg-gradient-to-r from-primary to-amber-500 hover:opacity-90 h-10"
                       >
-                        <Printer className="h-4 w-4" />
-                        Generate Bill
+                        {isSaving ? (
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Printer className="h-4 w-4" />
+                        )}
+                        {isSaving ? "Generating Bill..." : "Generate & Print Bill"}
                       </Button>
                     </CardContent>
                   </Card>
@@ -1078,6 +1079,7 @@ const OldGoldExchange = () => {
               grandTotal={grandTotal}
               exchangeType={activeTab}
               invoiceNumber={currentInvoiceNumber}
+              billDate={new Date()}
               creditedAmount={creditedAmountValue}
               remainingAmount={remainingAmount}
             />

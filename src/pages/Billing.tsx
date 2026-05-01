@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, Printer, Pencil } from "lucide-react";
+import { Plus, Trash2, Printer, Pencil, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/db";
+import { settings as settingsTable, categories as categoriesTable, subcategories as subcategoriesTable, bills as billsTable, bill_items as billItemsTable } from "@/db/schema";
+import { eq, asc } from "drizzle-orm";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PrintableBill } from "@/components/PrintableBill";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -57,63 +59,37 @@ const Billing = () => {
   });
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [currentInvoiceNumber, setCurrentInvoiceNumber] = useState<string>("");
+  const [isSaving, setIsSaving] = useState(false);
   useEffect(() => {
     fetchData();
 
-    // Real-time subscriptions
-    const settingsChannel = supabase.channel('billing-settings').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'settings'
-    }, () => {
-      fetchSettings();
-    }).subscribe();
-    const categoriesChannel = supabase.channel('billing-categories').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'categories'
-    }, () => {
-      fetchCategories();
-    }).subscribe();
-    const subcategoriesChannel = supabase.channel('billing-subcategories').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'subcategories'
-    }, () => {
-      fetchSubcategories();
-    }).subscribe();
-    return () => {
-      supabase.removeChannel(settingsChannel);
-      supabase.removeChannel(categoriesChannel);
-      supabase.removeChannel(subcategoriesChannel);
-    };
+    // Set up polling to keep data in sync across tabs
+    const interval = setInterval(() => {
+      fetchData();
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, []);
   const fetchData = async () => {
     await Promise.all([fetchSettings(), fetchCategories(), fetchSubcategories()]);
     setLoading(false);
   };
   const fetchSettings = async () => {
-    const {
-      data
-    } = await supabase.from('settings').select('*').single();
-    if (data) {
-      setGoldRate(Number(data.gold_rate));
-      setSilverRate(Number((data as any).silver_rate) || 7000);
-      setGstPercentage(Number((data as any).gst_rate) || 3);
+    const data = await db.select().from(settingsTable).limit(1);
+    if (data.length > 0) {
+      setGoldRate(Number(data[0].gold_rate));
+      setSilverRate(Number((data[0] as any).silver_rate) || 7000);
+      setGstPercentage(Number((data[0] as any).gst_rate) || 3);
     }
   };
   const fetchCategories = async () => {
-    const {
-      data: categoriesData
-    } = await supabase.from('categories').select('*').order('name');
+    const categoriesData = await db.select().from(categoriesTable).orderBy(asc(categoriesTable.name));
     if (categoriesData) {
       setCategories(categoriesData);
     }
   };
   const fetchSubcategories = async () => {
-    const {
-      data: subcategoriesData
-    } = await supabase.from('subcategories').select('*').order('name');
+    const subcategoriesData = await db.select().from(subcategoriesTable).orderBy(asc(subcategoriesTable.name));
     if (subcategoriesData) {
       setSubcategories(subcategoriesData);
     }
@@ -221,39 +197,29 @@ const Billing = () => {
       toast.error("Please add customer name and at least one item");
       return;
     }
+    setIsSaving(true);
     try {
       // Get current settings to increment invoice number
-      const { data: settingsData, error: settingsError } = await supabase
-        .from('settings' as any)
-        .select('id, last_invoice_number')
-        .single();
+      const settingsData = await db.select({ id: settingsTable.id, last_invoice_number: settingsTable.last_invoice_number }).from(settingsTable).limit(1);
 
-      if (settingsError) throw settingsError;
+      if (settingsData.length === 0) throw new Error("Settings not found");
 
-      const nextInvoiceNumber = ((settingsData as any).last_invoice_number || 0) + 1;
+      const nextInvoiceNumber = (settingsData[0].last_invoice_number || 0) + 1;
       const invoiceNumber = `MGM_${nextInvoiceNumber}`;
 
       // Set the invoice number for display
       setCurrentInvoiceNumber(invoiceNumber);
 
       // Update last invoice number in settings
-      const { error: updateError } = await supabase
-        .from('settings' as any)
-        .update({ last_invoice_number: nextInvoiceNumber })
-        .eq('id', (settingsData as any).id);
-
-      if (updateError) throw updateError;
+      await db.update(settingsTable).set({ last_invoice_number: nextInvoiceNumber }).where(eq(settingsTable.id, settingsData[0].id));
 
       // Save bill to database
-      const {
-        data: billData,
-        error: billError
-      } = await supabase.from('bills' as any).insert({
+      const billDataArr = await db.insert(billsTable).values({
         customer_name: customerName,
         customer_phone: customerPhone,
         customer_address: customerAddress,
         customer_gst_pan: customerGstPan,
-        bill_date: new Date().toISOString(),
+        bill_date: new Date(),
         gold_rate: goldRate,
         gst_percentage: gstPercentage,
         subtotal,
@@ -262,12 +228,13 @@ const Billing = () => {
         credited_amount: creditedAmount,
         grand_total: grandTotal,
         invoice_number: invoiceNumber
-      }).select().single();
-      if (billError || !billData) throw billError || new Error('No data returned');
+      }).returning();
+      
+      const billData = billDataArr[0];
 
       // Save bill items
       const itemsToInsert = billItems.map(item => ({
-        bill_id: (billData as any).id,
+        bill_id: billData.id,
         category_id: item.categoryId,
         category_name: item.categoryName,
         subcategory_name: item.subcategoryName,
@@ -277,10 +244,7 @@ const Billing = () => {
         seikuli_rate: item.seikuliRate,
         total: item.total
       }));
-      const {
-        error: itemsError
-      } = await supabase.from('bill_items' as any).insert(itemsToInsert);
-      if (itemsError) throw itemsError;
+      await db.insert(billItemsTable).values(itemsToInsert);
       toast.success(`Bill for ${customerName} has been saved`);
 
       // Trigger print dialog after successful save
@@ -302,6 +266,8 @@ const Billing = () => {
     } catch (error) {
       console.error('Error saving bill:', error);
       toast.error("Failed to save bill. Please try again.");
+    } finally {
+      setIsSaving(false);
     }
   };
   return <SidebarProvider>
@@ -419,10 +385,20 @@ const Billing = () => {
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="weight" className="text-sm">Weight (grams)</Label>
-                      <Input id="weight" type="number" step="0.01" placeholder="2.5" value={currentItem.weight} onChange={e => setCurrentItem({
-                        ...currentItem,
-                        weight: e.target.value
-                      })} className="h-9" />
+                      <Input 
+                        id="weight" 
+                        type="text" 
+                        inputMode="decimal" 
+                        placeholder="2.5" 
+                        value={currentItem.weight} 
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                            setCurrentItem({ ...currentItem, weight: val });
+                          }
+                        }} 
+                        className="h-9" 
+                      />
                     </div>
                     <div className="flex items-center space-x-2">
                       <Checkbox id="gst" checked={currentItem.gstApplicable} onCheckedChange={checked => setCurrentItem({
@@ -509,10 +485,16 @@ const Billing = () => {
                         <Label htmlFor="discountAmount" className="text-sm">Discount Amount</Label>
                         <Input
                           id="discountAmount"
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           placeholder="Enter discount amount"
-                          value={discountAmount || ""}
-                          onChange={e => setDiscountAmount(Number(e.target.value) || 0)}
+                          value={discountAmount === 0 ? "" : discountAmount}
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                              setDiscountAmount(val === "" ? 0 : Number(val));
+                            }
+                          }}
                           className="h-9"
                         />
                       </div>
@@ -530,10 +512,16 @@ const Billing = () => {
                         <Label htmlFor="creditedAmount" className="text-sm">Credited Amount</Label>
                         <Input
                           id="creditedAmount"
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           placeholder="Enter credited amount"
-                          value={creditedAmount || ""}
-                          onChange={e => setCreditedAmount(Number(e.target.value) || 0)}
+                          value={creditedAmount === 0 ? "" : creditedAmount}
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                              setCreditedAmount(val === "" ? 0 : Number(val));
+                            }
+                          }}
                           className="h-9"
                         />
                       </div>
@@ -544,9 +532,17 @@ const Billing = () => {
                       </div>
                     </div>
 
-                    <Button onClick={handlePrintBill} className="w-full gap-2 bg-gradient-to-r from-primary to-amber-500 hover:opacity-90 h-10">
-                      <Printer className="h-4 w-4" />
-                      Print Bill
+                    <Button 
+                      onClick={handlePrintBill} 
+                      disabled={isSaving}
+                      className="w-full gap-2 bg-gradient-to-r from-primary to-amber-500 hover:opacity-90 h-10"
+                    >
+                      {isSaving ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Printer className="h-4 w-4" />
+                      )}
+                      {isSaving ? "Generating Bill..." : "Generate & Print Bill"}
                     </Button>
                   </CardContent>
                 </Card>
@@ -574,6 +570,7 @@ const Billing = () => {
           grandTotal={grandTotal}
           exchangeType="regular"
           invoiceNumber={currentInvoiceNumber}
+          billDate={new Date()}
           creditedAmount={creditedAmount}
           remainingAmount={remainingAmount}
         />

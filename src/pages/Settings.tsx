@@ -6,7 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Plus, Trash2, Pencil } from "lucide-react";
 import toast from "react-hot-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/db";
+import { settings as settingsTable, categories as categoriesTable, subcategories as subcategoriesTable } from "@/db/schema";
+import { eq, asc } from "drizzle-orm";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -16,6 +18,7 @@ interface Category {
   id: string;
   name: string;
 }
+
 
 interface Subcategory {
   id: string;
@@ -59,39 +62,24 @@ const Settings = () => {
     fetchCategories();
     fetchSubcategories();
 
-    // Set up real-time subscriptions
-    const settingsChannel = supabase.channel('settings-changes').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'settings'
-    }, () => {
+    // Set up polling to keep data in sync
+    const interval = setInterval(() => {
       fetchSettings();
-    }).subscribe();
-    const categoriesChannel = supabase.channel('categories-changes').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'categories'
-    }, () => {
       fetchCategories();
-    }).subscribe();
-    const subcategoriesChannel = supabase.channel('subcategories-changes').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'subcategories'
-    }, () => {
       fetchSubcategories();
-    }).subscribe();
-    return () => {
-      supabase.removeChannel(settingsChannel);
-      supabase.removeChannel(categoriesChannel);
-      supabase.removeChannel(subcategoriesChannel);
-    };
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, []);
   const fetchSettings = async () => {
-    const {
-      data,
-      error
-    } = await supabase.from('settings').select('*').single();
+    let data = null;
+    let error = null;
+    try {
+      const res = await db.select().from(settingsTable).limit(1);
+      if (res.length > 0) data = res[0];
+    } catch (err) {
+      error = err;
+    }
     if (error) {
       console.error('Error fetching settings:', error);
     } else if (data) {
@@ -102,10 +90,13 @@ const Settings = () => {
     setLoading(false);
   };
   const fetchCategories = async () => {
-    const {
-      data: categoriesData,
-      error: categoriesError
-    } = await supabase.from('categories').select('*').order('name');
+    let categoriesData = null;
+    let categoriesError = null;
+    try {
+      categoriesData = await db.select().from(categoriesTable).orderBy(asc(categoriesTable.name));
+    } catch (err) {
+      categoriesError = err;
+    }
     if (categoriesError) {
       console.error('Error fetching categories:', categoriesError);
       return;
@@ -114,10 +105,13 @@ const Settings = () => {
   };
 
   const fetchSubcategories = async () => {
-    const {
-      data: subcategoriesData,
-      error: subcategoriesError
-    } = await supabase.from('subcategories').select('*').order('name');
+    let subcategoriesData = null;
+    let subcategoriesError = null;
+    try {
+      subcategoriesData = await db.select().from(subcategoriesTable).orderBy(asc(subcategoriesTable.name));
+    } catch (err) {
+      subcategoriesError = err;
+    }
     if (subcategoriesError) {
       console.error('Error fetching subcategories:', subcategoriesError);
       return;
@@ -125,13 +119,19 @@ const Settings = () => {
     setSubcategories(subcategoriesData || []);
   };
   const handleSaveRates = async () => {
-    const {
-      error
-    } = await supabase.from('settings').update({
-      gold_rate: parseFloat(goldRate),
-      silver_rate: parseFloat(silverRate),
-      gst_rate: parseFloat(gstRate)
-    }).eq('id', (await supabase.from('settings').select('id').single()).data?.id);
+    let error = null;
+    try {
+      const currentSettings = await db.select({ id: settingsTable.id }).from(settingsTable).limit(1);
+      if (currentSettings.length > 0) {
+        await db.update(settingsTable).set({
+          gold_rate: parseFloat(goldRate),
+          silver_rate: parseFloat(silverRate),
+          gst_rate: parseFloat(gstRate)
+        }).where(eq(settingsTable.id, currentSettings[0].id));
+      }
+    } catch (err) {
+      error = err;
+    }
     if (error) {
       toast.error("Failed to update rates");
     } else {
@@ -143,16 +143,20 @@ const Settings = () => {
       toast.error("Please enter category name");
       return;
     }
-    const {
-      error
-    } = await supabase.from('categories').insert({
-      name: newCategory
-    });
+    let error = null;
+    try {
+      await db.insert(categoriesTable).values({
+        name: newCategory
+      });
+    } catch (err: any) {
+      error = err;
+    }
     if (error) {
       toast.error(error.message);
     } else {
       const addedCategoryName = newCategory;
       setNewCategory("");
+      await fetchCategories();
       toast.success(`${addedCategoryName} has been added successfully.`);
     }
   };
@@ -165,12 +169,16 @@ const Settings = () => {
   };
   const handleDeleteCategory = async () => {
     if (!categoryToDelete) return;
-    const {
-      error
-    } = await supabase.from('categories').delete().eq('id', categoryToDelete.id);
+    let error = null;
+    try {
+      await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryToDelete.id));
+    } catch (err: any) {
+      error = err;
+    }
     if (error) {
       toast.error(error.message);
     } else {
+      await fetchCategories();
       toast.success(`${categoryToDelete.name} has been removed successfully.`);
     }
     setShowDeleteDialog(false);
@@ -185,16 +193,20 @@ const Settings = () => {
       toast.error("Please enter category name");
       return;
     }
-    const {
-      error
-    } = await supabase.from('categories').update({
-      name: editCategoryName
-    }).eq('id', id);
+    let error = null;
+    try {
+      await db.update(categoriesTable).set({
+        name: editCategoryName
+      }).where(eq(categoriesTable.id, id));
+    } catch (err: any) {
+      error = err;
+    }
     if (error) {
       toast.error(error.message);
     } else {
       setEditingCategoryId(null);
       setEditCategoryName("");
+      await fetchCategories();
       toast.success("Category has been updated successfully.");
     }
   };
@@ -209,13 +221,16 @@ const Settings = () => {
       toast.error("Please enter subcategory name and select a category");
       return;
     }
-    const {
-      error
-    } = await supabase.from('subcategories').insert({
-      name: newSubcategory,
-      category_id: selectedCategoryForSub,
-      seikuli_rate: newSubcategorySeikuli.trim() ? parseFloat(newSubcategorySeikuli) : null
-    });
+    let error = null;
+    try {
+      await db.insert(subcategoriesTable).values({
+        name: newSubcategory,
+        category_id: selectedCategoryForSub,
+        seikuli_rate: newSubcategorySeikuli.trim() ? parseFloat(newSubcategorySeikuli) : null
+      });
+    } catch (err: any) {
+      error = err;
+    }
     if (error) {
       toast.error(error.message);
     } else {
@@ -223,6 +238,7 @@ const Settings = () => {
       setNewSubcategory("");
       setNewSubcategorySeikuli("");
       setSelectedCategoryForSub("");
+      await fetchSubcategories();
       toast.success(`${addedSubcategoryName} has been added successfully.`);
     }
   };
@@ -237,12 +253,16 @@ const Settings = () => {
 
   const handleDeleteSubcategory = async () => {
     if (!subcategoryToDelete) return;
-    const {
-      error
-    } = await supabase.from('subcategories').delete().eq('id', subcategoryToDelete.id);
+    let error = null;
+    try {
+      await db.delete(subcategoriesTable).where(eq(subcategoriesTable.id, subcategoryToDelete.id));
+    } catch (err: any) {
+      error = err;
+    }
     if (error) {
       toast.error(error.message);
     } else {
+      await fetchSubcategories();
       toast.success(`${subcategoryToDelete.name} has been removed successfully.`);
     }
     setShowDeleteSubDialog(false);
@@ -261,13 +281,16 @@ const Settings = () => {
       toast.error("Please enter subcategory name and select a category");
       return;
     }
-    const {
-      error
-    } = await supabase.from('subcategories').update({
-      name: editSubcategoryName,
-      category_id: editSubcategoryCategoryId,
-      seikuli_rate: editSubcategorySeikuli.trim() ? parseFloat(editSubcategorySeikuli) : null
-    }).eq('id', id);
+    let error = null;
+    try {
+      await db.update(subcategoriesTable).set({
+        name: editSubcategoryName,
+        category_id: editSubcategoryCategoryId,
+        seikuli_rate: editSubcategorySeikuli.trim() ? parseFloat(editSubcategorySeikuli) : null
+      }).where(eq(subcategoriesTable.id, id));
+    } catch (err: any) {
+      error = err;
+    }
     if (error) {
       toast.error(error.message);
     } else {
@@ -275,6 +298,7 @@ const Settings = () => {
       setEditSubcategoryName("");
       setEditSubcategoryCategoryId("");
       setEditSubcategorySeikuli("");
+      await fetchSubcategories();
       toast.success("Subcategory has been updated successfully.");
     }
   };
@@ -318,15 +342,54 @@ const Settings = () => {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="goldRate">Gold Rate (per gram)</Label>
-                        <Input id="goldRate" type="number" placeholder="10000" value={goldRate} onChange={e => setGoldRate(e.target.value)} className="text-lg font-semibold" />
+                        <Input 
+                          id="goldRate" 
+                          type="text" 
+                          inputMode="decimal" 
+                          placeholder="10000" 
+                          value={goldRate} 
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                              setGoldRate(val);
+                            }
+                          }} 
+                          className="text-lg font-semibold" 
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="silverRate">Silver Rate (per gram)</Label>
-                        <Input id="silverRate" type="number" placeholder="7000" value={silverRate} onChange={e => setSilverRate(e.target.value)} className="text-lg font-semibold" />
+                        <Input 
+                          id="silverRate" 
+                          type="text" 
+                          inputMode="decimal" 
+                          placeholder="7000" 
+                          value={silverRate} 
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                              setSilverRate(val);
+                            }
+                          }} 
+                          className="text-lg font-semibold" 
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="gstRate">GST (%)</Label>
-                        <Input id="gstRate" type="number" step="0.1" placeholder="3" value={gstRate} onChange={e => setGstRate(e.target.value)} className="text-lg font-semibold" />
+                        <Input 
+                          id="gstRate" 
+                          type="text" 
+                          inputMode="decimal" 
+                          placeholder="3" 
+                          value={gstRate} 
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                              setGstRate(val);
+                            }
+                          }} 
+                          className="text-lg font-semibold" 
+                        />
                       </div>
                     </div>
                     <Button onClick={handleSaveRates} className="w-full md:w-auto">
@@ -426,7 +489,20 @@ const Settings = () => {
                           </SelectContent>
                         </Select>
                         <Input placeholder="Subcategory name" value={newSubcategory} onChange={e => setNewSubcategory(e.target.value)} onKeyPress={e => e.key === "Enter" && !e.shiftKey && handleAddSubcategory()} />
-                        <Input placeholder="Seikuli rate (optional)" type="number" value={newSubcategorySeikuli} onChange={e => setNewSubcategorySeikuli(e.target.value)} onKeyPress={e => e.key === "Enter" && !e.shiftKey && handleAddSubcategory()} className="max-w-[150px]" />
+                        <Input 
+                          placeholder="Seikuli rate (optional)" 
+                          type="text" 
+                          inputMode="decimal" 
+                          value={newSubcategorySeikuli} 
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                              setNewSubcategorySeikuli(val);
+                            }
+                          }} 
+                          onKeyPress={e => e.key === "Enter" && !e.shiftKey && handleAddSubcategory()} 
+                          className="max-w-[150px]" 
+                        />
                         <Button onClick={handleAddSubcategory} className="gap-2 whitespace-nowrap">
                           <Plus className="h-4 w-4" />
                           Add Subcategory
@@ -463,7 +539,19 @@ const Settings = () => {
                                             </SelectContent>
                                           </Select>
                                           <Input placeholder="Subcategory name" value={editSubcategoryName} onChange={e => setEditSubcategoryName(e.target.value)} />
-                                          <Input placeholder="Seikuli rate (optional)" type="number" value={editSubcategorySeikuli} onChange={e => setEditSubcategorySeikuli(e.target.value)} className="max-w-[150px]" />
+                                          <Input 
+                                            placeholder="Seikuli rate (optional)" 
+                                            type="text" 
+                                            inputMode="decimal" 
+                                            value={editSubcategorySeikuli} 
+                                            onChange={e => {
+                                              const val = e.target.value;
+                                              if (val === "" || /^\d*\.?\d*$/.test(val)) {
+                                                setEditSubcategorySeikuli(val);
+                                              }
+                                            }} 
+                                            className="max-w-[150px]" 
+                                          />
                                         </div>
                                         <div className="flex gap-2">
                                           <Button onClick={() => handleUpdateSubcategory(subcategory.id)} size="sm">
@@ -505,7 +593,6 @@ const Settings = () => {
               </div>
             </div>
           </main>
-          
           <Footer />
         </div>
       </div>

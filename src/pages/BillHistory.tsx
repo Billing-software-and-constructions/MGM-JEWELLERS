@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import Footer from "@/components/Footer";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,11 +13,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format, startOfDay, endOfDay, setYear, getYear } from "date-fns";
+import { format, startOfDay, endOfDay, setYear, getYear, startOfMonth, endOfMonth } from "date-fns";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/db";
+import { bills as billsTable, bill_items as billItemsTable, old_exchanges as oldExchangesTable } from "@/db/schema";
+import { eq, and, or, gte, lte, desc, ilike, isNotNull, notInArray, notExists } from "drizzle-orm";
 import toast from "react-hot-toast";
 import { PrintableBill } from "@/components/PrintableBill";
+import DatePicker from "@/components/modern-ui/date-picker";
 
 // Helper function to get current date in IST
 const getISTDate = () => {
@@ -30,7 +34,7 @@ interface Bill {
   customer_phone?: string;
   customer_address?: string;
   customer_gst_pan?: string;
-  bill_date: string;
+  bill_date: Date | string;
   subtotal: number;
   gst_amount: number;
   grand_total: number;
@@ -57,7 +61,7 @@ interface OldExchange {
   customer_phone?: string;
   customer_address?: string;
   customer_gst_pan?: string;
-  created_at: string;
+  created_at: Date | string;
   category_name: string;
   subcategory_name?: string;
   initial_weight: number;
@@ -72,14 +76,17 @@ interface OldExchange {
 
 const BillHistory = () => {
   const todayIST = getISTDate();
-  const [bills, setBills] = useState<Bill[]>([]);
-  const [oldExchanges, setOldExchanges] = useState<OldExchange[]>([]);
-  const [startDate, setStartDate] = useState<Date>(todayIST);
-  const [endDate, setEndDate] = useState<Date>(todayIST);
+  const [startDate, setStartDate] = useState<Date>(startOfMonth(todayIST));
+  const [endDate, setEndDate] = useState<Date>(endOfMonth(todayIST));
   const [selectedYear, setSelectedYear] = useState<number>(getYear(todayIST));
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
-  const [isFiltering, setIsFiltering] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [phoneNumber, setPhoneNumber] = useState<string>("");
+  const [appliedInvoiceNumber, setAppliedInvoiceNumber] = useState<string>("");
+  const [appliedPhoneNumber, setAppliedPhoneNumber] = useState<string>("");
+  const [pageBills, setPageBills] = useState(1);
+  const [pageExchanges, setPageExchanges] = useState(1);
+  const ITEMS_PER_PAGE = 20;
+
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
   const [billItems, setBillItems] = useState<BillItem[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -93,143 +100,96 @@ const BillHistory = () => {
   // Generate year options from 2020 to 2099
   const yearOptions = Array.from({ length: 80 }, (_, i) => 2020 + i);
 
-  useEffect(() => {
-    // Load data for current date by default
-    if (activeTab === "bills") {
-      loadBills();
-    } else {
-      loadOldExchanges();
-    }
-
-    // Set up real-time subscriptions
-    const billsChannel = supabase
-      .channel('bills-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'bills'
-        },
-        () => {
-          if (activeTab === "bills") loadBills();
-        }
-      )
-      .subscribe();
-
-    const exchangesChannel = supabase
-      .channel('exchanges-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'old_exchanges'
-        },
-        () => {
-          if (activeTab === "old-exchanges") loadOldExchanges();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(billsChannel);
-      supabase.removeChannel(exchangesChannel);
-    };
-  }, [startDate, endDate, activeTab]);
-
-  const loadBills = async () => {
-    try {
-      setLoading(true);
-
-      // Get start and end of day in ISO format
+  const { data: bills = [], isLoading: isLoadingBills, isFetching: isFetchingBills } = useQuery({
+    queryKey: ['bills', startDate.toISOString(), endDate.toISOString(), appliedInvoiceNumber, appliedPhoneNumber, pageBills],
+    queryFn: async () => {
       const startOfDayISO = startOfDay(startDate).toISOString();
       const endOfDayISO = endOfDay(endDate).toISOString();
 
-      // First, get all bill IDs that have linked old_exchange records
-      // These should only appear in Old Exchange Bills, not Regular Bills
-      const { data: exchangeLinkedBills } = await supabase
-        .from('old_exchanges' as any)
-        .select('bill_id')
-        .not('bill_id', 'is', null);
+      const conditions = [
+        gte(billsTable.bill_date, new Date(startOfDayISO)),
+        lte(billsTable.bill_date, new Date(endOfDayISO)),
+        notExists(
+          db.select()
+            .from(oldExchangesTable)
+            .where(eq(oldExchangesTable.bill_id, billsTable.id))
+        )
+      ];
 
-      const linkedBillIds = (exchangeLinkedBills || []).map((e: any) => e.bill_id).filter(Boolean);
-
-      let query = supabase
-        .from('bills' as any)
-        .select('*')
-        .gte('bill_date', startOfDayISO)
-        .lte('bill_date', endOfDayISO);
-
-      // Add invoice number filter if provided
-      if (invoiceNumber.trim()) {
-        query = query.ilike('invoice_number', `%${invoiceNumber.trim()}%`);
+      if (appliedInvoiceNumber.trim()) {
+        conditions.push(ilike(billsTable.invoice_number, `%${appliedInvoiceNumber.trim()}%`));
       }
 
-      const { data, error } = await query.order('bill_date', { ascending: false });
+      if (appliedPhoneNumber.trim()) {
+        conditions.push(ilike(billsTable.customer_phone, `%${appliedPhoneNumber.trim()}%`));
+      }
 
-      if (error) throw error;
+      const data = await db
+        .select()
+        .from(billsTable)
+        .where(and(...conditions))
+        .orderBy(desc(billsTable.bill_date))
+        .limit(ITEMS_PER_PAGE)
+        .offset((pageBills - 1) * ITEMS_PER_PAGE);
 
-      // Filter out bills that are linked to old exchanges
-      const filteredBills = ((data as any) || []).filter(
-        (bill: any) => !linkedBillIds.includes(bill.id)
-      );
+      return data;
+    },
+    refetchInterval: 3000,
+    placeholderData: keepPreviousData,
+  });
 
-      setBills(filteredBills);
-    } catch (error) {
-      console.error('Error loading bills:', error);
-      toast.error("Failed to load bills");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadOldExchanges = async () => {
-    try {
-      setLoading(true);
-
-      // Get start and end of day in ISO format
+  const { data: oldExchanges = [], isLoading: isLoadingExchanges, isFetching: isFetchingExchanges } = useQuery({
+    queryKey: ['oldExchanges', startDate.toISOString(), endDate.toISOString(), appliedInvoiceNumber, appliedPhoneNumber, pageExchanges],
+    queryFn: async () => {
       const startOfDayISO = startOfDay(startDate).toISOString();
       const endOfDayISO = endOfDay(endDate).toISOString();
 
-      const { data, error } = await supabase
-        .from('old_exchanges' as any)
-        .select(`
-          *,
-          bills!bill_id (
-            invoice_number
+      const conditions = [
+        gte(oldExchangesTable.created_at, new Date(startOfDayISO)),
+        lte(oldExchangesTable.created_at, new Date(endOfDayISO))
+      ];
+
+      if (appliedInvoiceNumber.trim()) {
+        conditions.push(
+          or(
+            ilike(oldExchangesTable.invoice_number, `%${appliedInvoiceNumber.trim()}%`),
+            ilike(billsTable.invoice_number, `%${appliedInvoiceNumber.trim()}%`)
           )
-        `)
-        .gte('created_at', startOfDayISO)
-        .lte('created_at', endOfDayISO)
-        .order('created_at', { ascending: false });
+        );
+      }
 
-      if (error) throw error;
+      if (appliedPhoneNumber.trim()) {
+        conditions.push(ilike(oldExchangesTable.customer_phone, `%${appliedPhoneNumber.trim()}%`));
+      }
 
-      // Map the data - use invoice_number from old_exchanges first, fallback to bills table
-      const mappedData = ((data as any) || []).map((exchange: any) => ({
+      const data = await db
+        .select({
+          exchange: oldExchangesTable,
+          invoice_number: billsTable.invoice_number
+        })
+        .from(oldExchangesTable)
+        .leftJoin(billsTable, eq(oldExchangesTable.bill_id, billsTable.id))
+        .where(and(...conditions))
+        .orderBy(desc(oldExchangesTable.created_at))
+        .limit(ITEMS_PER_PAGE)
+        .offset((pageExchanges - 1) * ITEMS_PER_PAGE);
+
+      let mappedData = data.map(({ exchange, invoice_number }) => ({
         ...exchange,
-        invoice_number: exchange.invoice_number || exchange.bills?.invoice_number || null,
-        bills: undefined, // Remove nested bills object
+        invoice_number: exchange.invoice_number || invoice_number || null,
       }));
 
-      setOldExchanges(mappedData);
-    } catch (error) {
-      console.error('Error loading old exchanges:', error);
-      toast.error("Failed to load old exchanges");
-    } finally {
-      setLoading(false);
-    }
-  };
+      return mappedData;
+    },
+    refetchInterval: 3000,
+    placeholderData: keepPreviousData,
+  });
 
   const handleApplyFilter = () => {
-    setIsFiltering(true);
-    if (activeTab === "bills") {
-      loadBills();
-    } else {
-      loadOldExchanges();
-    }
-    setIsFiltering(false);
+    setAppliedInvoiceNumber(invoiceNumber);
+    setAppliedPhoneNumber(phoneNumber);
+    setPageBills(1);
+    setPageExchanges(1);
   };
 
   const handleDateChange = (date: Date | undefined, isStartDate: boolean) => {
@@ -239,6 +199,8 @@ const BillHistory = () => {
       } else {
         setEndDate(date);
       }
+      setPageBills(1);
+      setPageExchanges(1);
       // Automatically update year dropdown when date changes
       const yearFromDate = getYear(date);
       if (yearFromDate !== selectedYear) {
@@ -249,10 +211,13 @@ const BillHistory = () => {
 
   const handleResetFilter = () => {
     const today = getISTDate();
-    setStartDate(today);
-    setEndDate(today);
+    setStartDate(startOfMonth(today));
+    setEndDate(endOfMonth(today));
     setSelectedYear(getYear(today));
     setInvoiceNumber("");
+    setPhoneNumber("");
+    setAppliedInvoiceNumber("");
+    setAppliedPhoneNumber("");
   };
 
   const handleYearChange = (year: string) => {
@@ -271,14 +236,12 @@ const BillHistory = () => {
     setLoadingDetails(true);
 
     try {
-      const { data, error } = await supabase
-        .from('bill_items' as any)
-        .select('*')
-        .eq('bill_id', bill.id);
+      const data = await db
+        .select()
+        .from(billItemsTable)
+        .where(eq(billItemsTable.bill_id, bill.id));
 
-      if (error) throw error;
-
-      setBillItems((data as any) || []);
+      setBillItems(data as any[]);
     } catch (error) {
       console.error('Error loading bill details:', error);
       toast.error("Failed to load bill details");
@@ -299,26 +262,22 @@ const BillHistory = () => {
     if (exchange.exchange_type === "ornaments" && exchange.bill_id) {
       try {
         // Fetch associated bill
-        const { data: billData, error: billError } = await supabase
-          .from('bills' as any)
-          .select('*')
-          .eq('id', exchange.bill_id)
-          .single();
+        const billData = await db
+          .select()
+          .from(billsTable)
+          .where(eq(billsTable.id, exchange.bill_id))
+          .limit(1);
 
-        if (billError) throw billError;
-
-        if (billData) {
-          setExchangeBill(billData as unknown as Bill);
+        if (billData.length > 0) {
+          setExchangeBill(billData[0] as unknown as Bill);
 
           // Fetch associated bill items
-          const { data: itemsData, error: itemsError } = await supabase
-            .from('bill_items' as any)
-            .select('*')
-            .eq('bill_id', exchange.bill_id);
+          const itemsData = await db
+            .select()
+            .from(billItemsTable)
+            .where(eq(billItemsTable.bill_id, exchange.bill_id));
 
-          if (itemsError) throw itemsError;
-
-          setExchangeBillItems((itemsData as any) || []);
+          setExchangeBillItems(itemsData as any[]);
         }
       } catch (error) {
         console.error('Error loading associated bill data:', error);
@@ -374,6 +333,19 @@ const BillHistory = () => {
                           placeholder="Search by invoice number..."
                           value={invoiceNumber}
                           onChange={(e) => setInvoiceNumber(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && handleApplyFilter()}
+                          className="w-full"
+                        />
+                      </div>
+
+                      {/* Phone Number */}
+                      <div className="flex-1 min-w-[200px]">
+                        <label className="text-sm font-medium mb-2 block">Phone Number</label>
+                        <Input
+                          placeholder="Search by phone number..."
+                          value={phoneNumber}
+                          onChange={(e) => setPhoneNumber(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && handleApplyFilter()}
                           className="w-full"
                         />
                       </div>
@@ -383,57 +355,21 @@ const BillHistory = () => {
                       {/* Start Date */}
                       <div className="flex-1 min-w-[200px]">
                         <label className="text-sm font-medium mb-2 block">Start Date</label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className={cn(
-                                "w-full justify-start text-left font-normal",
-                                !startDate && "text-muted-foreground"
-                              )}
-                            >
-                              <Calendar className="mr-2 h-4 w-4" />
-                              {startDate ? format(startDate, "PPP") : <span>Pick a date</span>}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <CalendarComponent
-                              mode="single"
-                              selected={startDate}
-                              onSelect={(date) => handleDateChange(date, true)}
-                              initialFocus
-                              className="pointer-events-auto"
-                            />
-                          </PopoverContent>
-                        </Popover>
+                        <DatePicker 
+                          date={startDate}
+                          setDate={(date) => handleDateChange(date, true)}
+                          placeholder="Pick start date"
+                        />
                       </div>
 
                       {/* End Date */}
                       <div className="flex-1 min-w-[200px]">
                         <label className="text-sm font-medium mb-2 block">End Date</label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className={cn(
-                                "w-full justify-start text-left font-normal",
-                                !endDate && "text-muted-foreground"
-                              )}
-                            >
-                              <Calendar className="mr-2 h-4 w-4" />
-                              {endDate ? format(endDate, "PPP") : <span>Pick a date</span>}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <CalendarComponent
-                              mode="single"
-                              selected={endDate}
-                              onSelect={(date) => handleDateChange(date, false)}
-                              initialFocus
-                              className="pointer-events-auto"
-                            />
-                          </PopoverContent>
-                        </Popover>
+                        <DatePicker 
+                          date={endDate}
+                          setDate={(date) => handleDateChange(date, false)}
+                          placeholder="Pick end date"
+                        />
                       </div>
 
                       {/* Year Selector */}
@@ -457,7 +393,6 @@ const BillHistory = () => {
                       <div className="flex gap-2">
                         <Button
                           onClick={handleApplyFilter}
-                          disabled={isFiltering}
                           className="gap-2"
                         >
                           <Filter className="h-4 w-4" />
@@ -489,11 +424,11 @@ const BillHistory = () => {
                     <TabsContent value="bills" className="mt-0">
                       <div className="mb-4">
                         <CardDescription>
-                          {loading ? "Loading..." : `${bills.length} bill(s) found for ${format(startDate, "PP")}`}
-                          {!loading && startDate.getTime() !== endDate.getTime() && ` - ${format(endDate, "PP")}`}
+                          {isLoadingBills && bills.length === 0 ? "Loading..." : `${bills.length} bill(s) found for ${format(startDate, "PP")}`}
+                          {!(isLoadingBills && bills.length === 0) && startDate.getTime() !== endDate.getTime() && ` - ${format(endDate, "PP")}`}
                         </CardDescription>
                       </div>
-                      {loading ? (
+                      {isLoadingBills && bills.length === 0 ? (
                         <div className="text-center py-12">
                           <p className="text-muted-foreground">Loading bills...</p>
                         </div>
@@ -505,49 +440,72 @@ const BillHistory = () => {
                           </Link>
                         </div>
                       ) : (
-                        <div className="space-y-3">
-                          {bills.map((bill) => (
-                            <div
-                              key={bill.id}
-                              className="flex items-center justify-between p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors gap-4"
-                            >
-                              <div className="flex-1">
-                                <div className="font-semibold text-lg">
-                                  {bill.customer_name}
-                                </div>
-                                <div className="text-sm text-muted-foreground mt-1">
-                                  {format(new Date(bill.bill_date), "PPP")} • {format(new Date(bill.bill_date), "p")}
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-xs text-muted-foreground">Grand Total</div>
-                                <div className="text-2xl font-bold text-primary">
-                                  ₹{Number(bill.grand_total).toLocaleString()}
-                                </div>
-                              </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleViewDetails(bill)}
-                                className="gap-2"
+                        <>
+                          <div className="space-y-3">
+                            {bills.map((bill) => (
+                              <div
+                                key={bill.id}
+                                className="flex items-center justify-between p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors gap-4"
                               >
-                                <Eye className="h-4 w-4" />
-                                View Details
+                                <div className="flex-1">
+                                  <div className="font-semibold text-lg">
+                                    {bill.customer_name}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground mt-1">
+                                    {format(new Date(bill.bill_date), "PPP")} • {format(new Date(bill.bill_date), "p")}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-xs text-muted-foreground">Grand Total</div>
+                                  <div className="text-2xl font-bold text-primary">
+                                    ₹{Number(bill.grand_total).toLocaleString()}
+                                  </div>
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleViewDetails(bill)}
+                                  className="gap-2"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  View Details
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                          
+                          {/* Pagination Controls for Bills */}
+                          {bills.length > 0 && (
+                            <div className="flex justify-between items-center mt-6">
+                              <Button 
+                                variant="outline" 
+                                disabled={pageBills === 1} 
+                                onClick={() => setPageBills(p => p - 1)}
+                              >
+                                Previous
+                              </Button>
+                              <span className="text-sm text-muted-foreground">Page {pageBills}</span>
+                              <Button 
+                                variant="outline" 
+                                disabled={bills.length < ITEMS_PER_PAGE} 
+                                onClick={() => setPageBills(p => p + 1)}
+                              >
+                                Next
                               </Button>
                             </div>
-                          ))}
-                        </div>
+                          )}
+                        </>
                       )}
                     </TabsContent>
 
                     <TabsContent value="old-exchanges" className="mt-0">
                       <div className="mb-4">
                         <CardDescription>
-                          {loading ? "Loading..." : `${oldExchanges.length} exchange(s) found for ${format(startDate, "PP")}`}
-                          {!loading && startDate.getTime() !== endDate.getTime() && ` - ${format(endDate, "PP")}`}
+                          {isLoadingExchanges && oldExchanges.length === 0 ? "Loading..." : `${oldExchanges.length} exchange(s) found for ${format(startDate, "PP")}`}
+                          {!(isLoadingExchanges && oldExchanges.length === 0) && startDate.getTime() !== endDate.getTime() && ` - ${format(endDate, "PP")}`}
                         </CardDescription>
                       </div>
-                      {loading ? (
+                      {isLoadingExchanges && oldExchanges.length === 0 ? (
                         <div className="text-center py-12">
                           <p className="text-muted-foreground">Loading old exchanges...</p>
                         </div>
@@ -559,47 +517,70 @@ const BillHistory = () => {
                           </Link>
                         </div>
                       ) : (
-                        <div className="space-y-3">
-                          {oldExchanges.map((exchange) => (
-                            <div
-                              key={exchange.id}
-                              className="flex items-center justify-between p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors gap-4"
-                            >
-                              <div className="flex-1">
-                                <div className="font-semibold text-lg">
-                                  {exchange.customer_name}
-                                </div>
-                                <div className="text-sm text-muted-foreground mt-1">
-                                  {format(new Date(exchange.created_at), "PPP")} • {format(new Date(exchange.created_at), "p")}
-                                </div>
-                                <div className="text-sm mt-2">
-                                  <span className="font-medium">{exchange.category_name}</span>
-                                  {exchange.subcategory_name && <span className="text-muted-foreground"> - {exchange.subcategory_name}</span>}
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-xs text-muted-foreground mb-1">
-                                  {exchange.initial_weight}g → {exchange.final_weight}g
-                                </div>
-                                <div className="text-xs text-muted-foreground mb-1">
-                                  {exchange.exchange_type} • ₹{exchange.metal_rate}/g
-                                </div>
-                                <div className="text-2xl font-bold text-primary">
-                                  ₹{Number(exchange.exchange_value).toLocaleString()}
-                                </div>
-                              </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleViewExchangeDetails(exchange)}
-                                className="gap-2"
+                        <>
+                          <div className="space-y-3">
+                            {oldExchanges.map((exchange) => (
+                              <div
+                                key={exchange.id}
+                                className="flex items-center justify-between p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors gap-4"
                               >
-                                <Eye className="h-4 w-4" />
-                                View Details
+                                <div className="flex-1">
+                                  <div className="font-semibold text-lg">
+                                    {exchange.customer_name}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground mt-1">
+                                    {format(new Date(exchange.created_at), "PPP")} • {format(new Date(exchange.created_at), "p")}
+                                  </div>
+                                  <div className="text-sm mt-2">
+                                    <span className="font-medium">{exchange.category_name}</span>
+                                    {exchange.subcategory_name && <span className="text-muted-foreground"> - {exchange.subcategory_name}</span>}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-xs text-muted-foreground mb-1">
+                                    {exchange.initial_weight}g → {exchange.final_weight}g
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mb-1">
+                                    {exchange.exchange_type} • ₹{exchange.metal_rate}/g
+                                  </div>
+                                  <div className="text-2xl font-bold text-primary">
+                                    ₹{Number(exchange.exchange_value).toLocaleString()}
+                                  </div>
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleViewExchangeDetails(exchange)}
+                                  className="gap-2"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  View Details
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Pagination Controls for Old Exchanges */}
+                          {oldExchanges.length > 0 && (
+                            <div className="flex justify-between items-center mt-6">
+                              <Button 
+                                variant="outline" 
+                                disabled={pageExchanges === 1} 
+                                onClick={() => setPageExchanges(p => p - 1)}
+                              >
+                                Previous
+                              </Button>
+                              <span className="text-sm text-muted-foreground">Page {pageExchanges}</span>
+                              <Button 
+                                variant="outline" 
+                                disabled={oldExchanges.length < ITEMS_PER_PAGE} 
+                                onClick={() => setPageExchanges(p => p + 1)}
+                              >
+                                Next
                               </Button>
                             </div>
-                          ))}
-                        </div>
+                          )}
+                        </>
                       )}
                     </TabsContent>
                   </CardContent>
@@ -768,6 +749,7 @@ const BillHistory = () => {
           grandTotal={selectedBill.grand_total}
           exchangeType="buy-ornaments"
           invoiceNumber={selectedBill.invoice_number}
+          billDate={selectedBill.bill_date}
           creditedAmount={selectedBill.credited_amount || 0}
           remainingAmount={selectedBill.grand_total - (selectedBill.credited_amount || 0)}
         />
@@ -923,6 +905,7 @@ const BillHistory = () => {
           }
           exchangeType={selectedExchange.exchange_type === "ornaments" ? "buy-ornaments" : selectedExchange.exchange_type}
           invoiceNumber={selectedExchange.invoice_number}
+          billDate={selectedExchange.created_at}
           creditedAmount={
             selectedExchange.exchange_type === "ornaments" && exchangeBill
               ? (exchangeBill.credited_amount || 0)

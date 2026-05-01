@@ -1,7 +1,9 @@
 import { useState } from "react";
 import Footer from "@/components/Footer";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,14 +20,22 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase
-        .from("users")
-        .select("*")
-        .eq("username", username)
-        .eq("password", password)
-        .maybeSingle();
-
-      if (error) throw error;
+      let data = null;
+      try {
+        const result = await db
+          .select()
+          .from(users)
+          .where(
+            and(
+              eq(users.username, username),
+              eq(users.password, password)
+            )
+          )
+          .limit(1);
+        if (result.length > 0) data = result[0];
+      } catch (err) {
+        throw err;
+      }
 
       if (data) {
         // Store user session
